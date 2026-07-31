@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { connectRunEvents, loadFlow, loadPublicShare } from "@/lib/flow-service";
-import { type LayoutMode, type ValidationIssue } from "@/lib/flow-types";
+import { type LayoutMode, type ValidationIssue } from "@flowverse/core";
 import { getProject, type ProjectSummary } from "@/lib/workspace-service";
 import { useAutosave } from "@/hooks/useAutosave";
 import { useFlowStore } from "@/store/flow-store";

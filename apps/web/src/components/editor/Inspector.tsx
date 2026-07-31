@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { NODE_PRESENTATION, type FlowEdge, type FlowNode } from "@/lib/flow-types";
+import { NODE_PRESENTATION, type FlowEdge, type FlowNode } from "@flowverse/core";
 import { useFlowStore } from "@/store/flow-store";
 
 function ConfigurationEditor({

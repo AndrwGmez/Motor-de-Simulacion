@@ -7,15 +7,29 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
+      // Las pruebas se ejecutan contra la fuente de los paquetes, no contra su
+      // artefacto: así el ciclo de desarrollo no exige compilar antes de probar,
+      // y un fallo señala la línea real y no el bundle.
+      "@flowverse/core": fileURLToPath(new URL("../../packages/core/src/index.ts", import.meta.url)),
+      "@flowverse/engine": fileURLToPath(new URL("../../packages/engine/src/index.ts", import.meta.url)),
+      "@flowverse/viewer": fileURLToPath(new URL("../../packages/viewer/src/index.ts", import.meta.url)),
     },
   },
   test: {
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
-    include: ["src/**/*.test.{ts,tsx}"],
+    // Las pruebas de los paquetes del workspace se ejecutan con este mismo
+    // corredor: al extraerlos se quedaron sin uno propio, y salir del paso
+    // dejándolas sin ejecutar habría sido perder la red de seguridad justo en
+    // el paso que más la necesita. Cada paquete tendrá el suyo cuando se genere
+    // su artefacto distribuible.
+    include: [
+      "src/**/*.test.{ts,tsx}",
+      "../../packages/*/src/**/*.test.{ts,tsx}",
+    ],
     coverage: {
       reporter: ["text", "json-summary"],
-      include: ["src/lib/**/*.ts", "src/store/**/*.ts"],
+      include: ["src/lib/**/*.ts", "src/store/**/*.ts", "../../packages/*/src/**/*.ts"],
     },
   },
 });

@@ -1,0 +1,45 @@
+{
+  "name": "@flowverse/viewer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Visor tridimensional de flujos: escena, distribuciones, cámara e instanciado.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsup",
+    "prepublishOnly": "tsup"
+  },
+  "dependencies": {
+    "@flowverse/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "three": ">=0.179.0",
+    "react-force-graph-3d": ">=1.29.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "@types/react": "^19.1.10",
+    "@types/react-dom": "^19.1.7",
+    "@types/three": "^0.179.0",
+    "react": "^19.1.1",
+    "three": "^0.179.1",
+    "react-force-graph-3d": "^1.29.0",
+    "tsup": "^8.5.0"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false
+}

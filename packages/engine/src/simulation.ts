@@ -5,7 +5,7 @@ import type {
   RunEvent,
   SimulationOverrides,
   SimulationPlan,
-} from "./flow-types";
+} from "@flowverse/core";
 
 function valueAt(input: unknown, path: string): unknown {
   if (!path || path === "/") return input;

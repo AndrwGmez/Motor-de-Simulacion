@@ -2,7 +2,7 @@ import Ajv2020 from "ajv/dist/2020";
 import addFormats from "ajv-formats";
 import { describe, expect, it } from "vitest";
 import schema from "../../../../packages/contracts/schemas/flow-definition.schema.json";
-import { DEMO_FLOW } from "./demo-flow";
+import { DEMO_FLOW } from "@flowverse/core";
 import { parseImportedFlow } from "./flow-service";
 
 describe("contrato FlowDefinition", () => {

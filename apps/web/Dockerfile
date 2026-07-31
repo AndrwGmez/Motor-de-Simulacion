@@ -4,6 +4,9 @@ RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/web/package.json apps/web/package.json
 COPY packages/contracts/package.json packages/contracts/package.json
+COPY packages/core/package.json packages/core/package.json
+COPY packages/engine/package.json packages/engine/package.json
+COPY packages/viewer/package.json packages/viewer/package.json
 RUN pnpm install --frozen-lockfile --filter @flowverse/web...
 
 FROM dependencies AS build
@@ -13,6 +16,10 @@ ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_WS_URL=$NEXT_PUBLIC_WS_URL
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY . .
+# Los paquetes se consumen compilados, así que se construyen antes que la app.
+# Se nombran de forma explícita: codegraph es solo dependencia de pruebas y no
+# tiene por qué instalarse ni compilarse dentro de la imagen.
+RUN pnpm --filter @flowverse/core --filter @flowverse/engine --filter @flowverse/viewer build
 RUN pnpm --filter @flowverse/web build
 
 FROM node:24.18.1-alpine@sha256:f70403e87646dc51b45295f4b8b70cdad0b63d2297c4c9899119b03f7af7a6b3 AS runtime

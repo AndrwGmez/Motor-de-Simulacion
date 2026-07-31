@@ -11,8 +11,8 @@ import {
   saveFlow,
   startRun,
 } from "@/lib/flow-service";
-import type { EditableFlow, FlowDefinition, RunSummary, ValidationIssue } from "@/lib/flow-types";
-import { flowMetrics, validateFlow } from "@/lib/validation";
+import type { EditableFlow, FlowDefinition, RunSummary, ValidationIssue } from "@flowverse/core";
+import { flowMetrics, validateFlow } from "@flowverse/engine";
 import { useFlowStore } from "@/store/flow-store";
 
 export function Modal({

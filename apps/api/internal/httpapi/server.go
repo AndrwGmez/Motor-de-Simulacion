@@ -27,7 +27,7 @@ import (
 const (
 	userContextKey = "flowverse.user"
 	authSourceKey  = "flowverse.auth_source"
-	maxBodyBytes   = 1 << 20
+	maxBodyBytes   = 24 << 20
 )
 
 type Config struct {

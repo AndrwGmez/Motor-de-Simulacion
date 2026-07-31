@@ -1,6 +1,6 @@
 "use client";
 
-import { NODE_PRESENTATION, NODE_TYPES, type NodeType } from "@/lib/flow-types";
+import { NODE_PRESENTATION, NODE_TYPES, type NodeType } from "@flowverse/core";
 
 interface NodePaletteProps {
   disabled?: boolean;

@@ -1,9 +1,9 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import type { FlowDefinition } from "@/lib/flow-types";
+import type { FlowDefinition } from "@flowverse/core";
 
-const FlowScene3D = dynamic(() => import("./FlowScene3D").then((module) => module.FlowScene3D), {
+const FlowScene3D = dynamic(() => import("@flowverse/viewer").then((module) => module.FlowScene3D), {
   ssr: false,
   loading: () => (
     <div className="scene-loading" role="status">

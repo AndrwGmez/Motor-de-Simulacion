@@ -124,7 +124,7 @@ El flujo es un multigrafo dirigido:
 - Los grupos son únicamente visuales y no admiten conexiones ni ejecución.
 - Cada ruta ejecutable debe poder alcanzar un nodo `end`.
 
-Los límites de entrada son 500 nodos, 1.000 conexiones, 250 variables y 1 MB de
+Los límites de entrada son 5.000 nodos, 10.000 conexiones, 250 variables y 24 MB de
 JSON.
 
 ### 4.1 Tipos de nodo
@@ -481,7 +481,10 @@ Cada consulta filtra por proyecto; un UUID conocido no concede acceso.
 
 Objetivo de referencia:
 
-- 500 nodos y 1.000 conexiones.
+- 5.000 nodos y 10.000 conexiones como tope del contrato. El objetivo de
+  navegación fluida se mide sobre 500 nodos y 1.000 conexiones; por encima de
+  esa cifra el editor sigue siendo utilizable pero deja de ser interactivo en
+  equipos modestos.
 - Al menos 30 FPS al navegar después de estabilizar física.
 - Validación y análisis bajo 500 ms.
 - 10.000 pasos sin pacing bajo 2 s.

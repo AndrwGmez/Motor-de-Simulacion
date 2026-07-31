@@ -1,4 +1,4 @@
-import type { FlowDefinition, ValidationIssue } from "./flow-types";
+import type { FlowDefinition, ValidationIssue } from "@flowverse/core";
 
 function issue(
   code: string,

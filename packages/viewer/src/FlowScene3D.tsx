@@ -2,9 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ForceGraph3D, { type ForceGraphMethods, type LinkObject, type NodeObject } from "react-force-graph-3d";
-import * as THREE from "three";
-import type { FlowDefinition, FlowEdge, FlowNode, NodeRunStatus } from "@/lib/flow-types";
-import { NODE_PRESENTATION } from "@/lib/flow-types";
+import type * as THREE from "three";
+import type { FlowDefinition, FlowEdge, FlowNode, NodeRunStatus } from "@flowverse/core";
+import { NODE_PRESENTATION } from "@flowverse/core";
+import { SceneResources } from "./scene-resources";
+import { DEFAULT_PAN, PAN_KEYS, applyCameraFeel, applyStudioLighting, easePan, ignoresKeyboard, panCamera, panDirection, type CameraControls } from "./scene-camera";
+import { BatchedLinks, InstancedBodies, applyLevelOfDetail, DEFAULT_LOD, type BatchedLink, type InstancedTarget, type LodLink } from "./scene-performance";
 
 interface GraphNode extends FlowNode {
   x?: number;
@@ -35,82 +38,6 @@ interface FlowScene3DProps {
   onBackgroundClick: () => void;
 }
 
-const STATUS_COLORS: Record<NodeRunStatus, string> = {
-  idle: "#7f8ba8",
-  queued: "#f4c261",
-  running: "#69a3ff",
-  success: "#37d6a0",
-  failed: "#ff617d",
-  skipped: "#596174",
-  waiting: "#f49a59",
-};
-
-function makeLabel(text: string, selected: boolean) {
-  const canvas = document.createElement("canvas");
-  canvas.width = 640;
-  canvas.height = 128;
-  const context = canvas.getContext("2d")!;
-  context.clearRect(0, 0, canvas.width, canvas.height);
-  context.font = `${selected ? 650 : 520} 34px Inter, Arial, sans-serif`;
-  context.textAlign = "center";
-  context.textBaseline = "middle";
-  const width = Math.min(590, context.measureText(text).width + 48);
-  context.fillStyle = selected ? "rgba(25, 32, 63, .96)" : "rgba(8, 12, 24, .86)";
-  context.strokeStyle = selected ? "rgba(130, 153, 255, .9)" : "rgba(118, 131, 169, .35)";
-  context.lineWidth = selected ? 4 : 2;
-  const x = (canvas.width - width) / 2;
-  context.beginPath();
-  context.roundRect(x, 24, width, 74, 23);
-  context.fill();
-  context.stroke();
-  context.fillStyle = selected ? "#ffffff" : "#d9deef";
-  context.fillText(text.slice(0, 48), canvas.width / 2, 62);
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
-  const sprite = new THREE.Sprite(material);
-  sprite.scale.set(90, 18, 1);
-  sprite.position.set(0, 28, 0);
-  sprite.renderOrder = 5;
-  return sprite;
-}
-
-function geometryFor(node: GraphNode): THREE.BufferGeometry {
-  switch (node.type) {
-    case "trigger":
-      return new THREE.SphereGeometry(11, 24, 16);
-    case "process":
-      return new THREE.BoxGeometry(20, 20, 20, 2, 2, 2);
-    case "decision":
-      return new THREE.OctahedronGeometry(14, 0);
-    case "data":
-      return new THREE.CylinderGeometry(11, 11, 22, 24);
-    case "integration":
-      return new THREE.CylinderGeometry(12, 12, 22, 6);
-    case "delay":
-      return new THREE.TorusGeometry(11, 3.7, 12, 32);
-    case "end":
-      return new THREE.SphereGeometry(12, 24, 16);
-    case "group":
-      return new THREE.BoxGeometry(112, 72, 48);
-  }
-}
-
-function disposeObject(object: THREE.Object3D) {
-  object.traverse((child) => {
-    if ("geometry" in child && child.geometry instanceof THREE.BufferGeometry) child.geometry.dispose();
-    if ("material" in child) {
-      const materials = Array.isArray(child.material) ? child.material : [child.material];
-      for (const material of materials) {
-        if (material instanceof THREE.Material) {
-          if ("map" in material && material.map instanceof THREE.Texture) material.map.dispose();
-          material.dispose();
-        }
-      }
-    }
-  });
-}
-
 export function FlowScene3D({
   flow,
   selectedNodeId,
@@ -130,7 +57,15 @@ export function FlowScene3D({
     ForceGraphMethods<NodeObject<GraphNode>, LinkObject<GraphNode, GraphEdge>> | undefined
   >(undefined);
   const [size, setSize] = useState({ width: 960, height: 640 });
-  const objectCache = useRef(new Map<string, THREE.Object3D>());
+  const resources = useRef<SceneResources>(undefined as unknown as SceneResources);
+  if (!resources.current) resources.current = new SceneResources();
+  const bodies = useRef<InstancedBodies>(undefined as unknown as InstancedBodies);
+  if (!bodies.current) bodies.current = new InstancedBodies(resources.current);
+  const rebuildBatches = useRef(true);
+  const linkBatch = useRef<BatchedLinks>(undefined as unknown as BatchedLinks);
+  if (!linkBatch.current) linkBatch.current = new BatchedLinks();
+  const pressedKeys = useRef(new Set<string>());
+  const panVelocity = useRef({ x: 0, y: 0 });
   const didInitialFit = useRef(false);
 
   useEffect(() => {
@@ -146,9 +81,67 @@ export function FlowScene3D({
     return () => observer.disconnect();
   }, []);
 
-  useEffect(() => () => {
-    for (const object of objectCache.current.values()) disposeObject(object);
-    objectCache.current.clear();
+  useEffect(() => {
+    const currentResources = resources.current;
+    const currentBodies = bodies.current;
+    const currentGraph = graphRef;
+    const currentLinks = linkBatch.current;
+    return () => {
+      const scene = currentGraph.current?.scene();
+      if (scene) {
+        currentBodies.dispose(scene);
+        currentLinks.dispose(scene);
+      }
+      currentResources.dispose();
+    };
+  }, []);
+
+  /**
+   * Flechas del teclado: desplazan el encuadre arriba, abajo y de lado a lado.
+   * Solo se registran las teclas; el movimiento lo integra el bucle por cuadro,
+   * que es lo que hace que arranque y frene de forma progresiva.
+   */
+  useEffect(() => {
+    const pressed = pressedKeys.current;
+    const down = (event: KeyboardEvent) => {
+      if (!PAN_KEYS.includes(event.key)) return;
+      if (ignoresKeyboard(event.target as Element | null)) return;
+      event.preventDefault();
+      pressed.add(event.key);
+    };
+    const up = (event: KeyboardEvent) => pressed.delete(event.key);
+    const reset = () => pressed.clear();
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    window.addEventListener("blur", reset);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", reset);
+      pressed.clear();
+    };
+  }, []);
+
+  // Inercia de la cámara: los controles de órbita frenan de forma progresiva en
+  // lugar de detenerse en seco. La librería ya llama a `controls.update()` en su
+  // bucle, así que basta con activarlo cuando el lienzo está montado.
+  useEffect(() => {
+    let cancelled = false;
+    const apply = () => {
+      if (cancelled) return;
+      const graph = graphRef.current;
+      const controls = graph?.controls() as CameraControls | undefined;
+      if (controls && "enableDamping" in controls) {
+        applyCameraFeel(controls);
+        const scene = graph?.scene();
+        const renderer = graph?.renderer();
+        if (scene && renderer) applyStudioLighting({ scene, renderer });
+      } else {
+        window.setTimeout(apply, 60);
+      }
+    };
+    apply();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -182,50 +175,79 @@ export function FlowScene3D({
     return { nodes, links };
   }, [flow]);
 
+  /**
+   * Bucle de rendimiento. Cada cuadro refresca las matrices de las instancias,
+   * que es barato; el nivel de detalle se recalcula cada pocos cuadros porque
+   * depende de la cámara y no necesita precisión absoluta.
+   */
+  useEffect(() => {
+    let handle = 0;
+    let frame = 0;
+    const step = () => {
+      handle = window.requestAnimationFrame(step);
+      const graph = graphRef.current;
+      if (!graph) return;
+      const scene = graph.scene();
+      const camera = graph.camera();
+      if (!scene || !camera) return;
+
+      if (rebuildBatches.current) {
+        const cuerpos = bodies.current.sync(
+          scene,
+          data.nodes as unknown as InstancedTarget[],
+          (node) => (nodeStates[node.id] ?? "idle") as NodeRunStatus,
+          selectedNodeId ?? connectionSourceId,
+        );
+        const agrupadas = linkBatch.current.sync(scene, data.links as unknown as BatchedLink[], {
+          selectedId: selectedEdgeId,
+          activeId: activeEdgeId,
+        });
+        // Si la librería aún no ha creado las conexiones, se reintenta.
+        // Se reintenta mientras cualquiera de los dos lotes no esté listo: antes
+        // solo se miraba el de conexiones, y si los nodos aún no tenían objeto
+        // se quedaban ocultos y sin lote que los dibujara.
+        rebuildBatches.current = !(cuerpos && agrupadas);
+      } else {
+        bodies.current.updatePositions();
+        linkBatch.current.updatePositions();
+      }
+
+      const objetivo = panDirection(pressedKeys.current);
+      panVelocity.current = easePan(panVelocity.current, objetivo, DEFAULT_PAN.smoothing);
+      if (Math.hypot(panVelocity.current.x, panVelocity.current.y) > 0.0005) {
+        const controls = graph.controls() as unknown as { target?: THREE.Vector3 } | undefined;
+        if (controls?.target) panCamera(camera, controls.target, panVelocity.current, DEFAULT_PAN);
+      }
+
+      frame += 1;
+      if (frame % 4 === 0) {
+        applyLevelOfDetail(
+          camera.position,
+          data.nodes,
+          data.links as unknown as LodLink[],
+          DEFAULT_LOD,
+          selectedNodeId ?? connectionSourceId,
+          (node) => {
+            const objeto = (node as { __threeObj?: THREE.Object3D }).__threeObj;
+            if (objeto) resources.current.attachLabel(objeto);
+          },
+        );
+      }
+    };
+    handle = window.requestAnimationFrame(step);
+    return () => window.cancelAnimationFrame(handle);
+  }, [activeEdgeId, connectionSourceId, data, nodeStates, selectedEdgeId, selectedNodeId]);
+
+  // Los lotes se rehacen cuando cambia el grafo o el aspecto de algún nodo.
+  useEffect(() => {
+    rebuildBatches.current = true;
+  }, [activeEdgeId, connectionSourceId, data, nodeStates, selectedEdgeId, selectedNodeId]);
+
   const nodeObject = useCallback((nodeValue: object) => {
     const node = nodeValue as GraphNode;
     const status = (nodeStates[node.id] ?? "idle") as NodeRunStatus;
     const selected = node.id === selectedNodeId || node.id === connectionSourceId;
-    const key = `${node.id}:${status}:${selected ? "selected" : "normal"}:${node.metadata.color ?? ""}`;
-    const cached = objectCache.current.get(key);
-    if (cached) return cached.clone();
-
-    const group = new THREE.Group();
-    const color = status === "idle" ? node.metadata.color ?? NODE_PRESENTATION[node.type].color : STATUS_COLORS[status];
-    const isContainer = node.type === "group";
-    const material = new THREE.MeshStandardMaterial({
-      color,
-      transparent: isContainer || status === "skipped",
-      opacity: isContainer ? 0.12 : status === "skipped" ? 0.35 : 0.96,
-      wireframe: isContainer,
-      roughness: 0.34,
-      metalness: 0.28,
-      emissive: new THREE.Color(color),
-      emissiveIntensity: selected ? 0.72 : status === "running" ? 0.9 : 0.15,
-      side: THREE.DoubleSide,
-    });
-    const mesh = new THREE.Mesh(geometryFor(node), material);
-    if (node.type === "decision") mesh.rotation.z = Math.PI / 4;
-    group.add(mesh);
-
-    if (node.type === "end") {
-      const ring = new THREE.Mesh(
-        new THREE.TorusGeometry(15.5, 1.2, 8, 32),
-        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.65 }),
-      );
-      ring.rotation.x = Math.PI / 2;
-      group.add(ring);
-    }
-    if (selected) {
-      const halo = new THREE.Mesh(
-        new THREE.SphereGeometry(node.type === "group" ? 65 : 19, 18, 12),
-        new THREE.MeshBasicMaterial({ color: "#8299ff", transparent: true, opacity: 0.1, side: THREE.BackSide }),
-      );
-      group.add(halo);
-    }
-    group.add(makeLabel(node.label, selected));
-    objectCache.current.set(key, group);
-    return group.clone();
+    return resources.current.nodeObject(node, status, selected);
   }, [connectionSourceId, nodeStates, selectedNodeId]);
 
   const focusNode = useCallback((node: GraphNode) => {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DEMO_DOCUMENT, DEMO_FLOW } from "./demo-flow";
+import { DEMO_DOCUMENT, DEMO_FLOW } from "@flowverse/core";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -385,5 +385,72 @@ describe("flow service API adapter", () => {
       ...structuredClone(DEMO_DOCUMENT),
       flowId: "02fbd9ba-8dd8-4f61-93be-845f067370f9",
     })).rejects.toThrow("cambió en otra pestaña");
+  });
+});
+
+// La API omite `metadata` porque el contrato lo declara opcional, pero el
+// editor 3D lee `node.metadata.color` en cada fotograma. La ingesta es el único
+// punto por el que entran flujos (API, importación, texto y enlace público),
+// así que es donde se rellena el valor.
+describe("ingesta de flujos sin campos opcionales", () => {
+  const apiShapedFlow = {
+    schemaVersion: "1.0",
+    name: "Pedidos",
+    variables: [],
+    layout: { mode: "directional" },
+    nodes: [
+      {
+        id: "start",
+        type: "trigger",
+        label: "Inicio",
+        inputs: [],
+        outputs: [{ id: "output", label: "Salida" }],
+        activationMode: "each",
+        durationMs: 0,
+        configuration: {},
+        position: { x: -120, y: 0, z: 0 },
+        locked: false,
+      },
+      {
+        id: "end",
+        type: "end",
+        label: "Fin",
+        inputs: [{ id: "input", label: "Entrada" }],
+        outputs: [],
+        activationMode: "each",
+        durationMs: 0,
+        configuration: { result: "success" },
+        position: { x: 120, y: 0, z: 0 },
+        locked: false,
+      },
+    ],
+    edges: [{
+      id: "start_end",
+      source: "start",
+      target: "end",
+      sourcePort: "output",
+      targetPort: "input",
+      priority: 0,
+      isDefault: false,
+    }],
+  };
+
+  it("rellena metadata ausente para que el editor pueda leer color y categoría", async () => {
+    const { parseImportedFlow } = await import("./flow-service");
+    const definition = parseImportedFlow(structuredClone(apiShapedFlow));
+    for (const node of definition.nodes) {
+      expect(node.metadata).toBeTypeOf("object");
+      expect(node.metadata).not.toBeNull();
+    }
+  });
+
+  it("conserva la metadata que ya venía en el flujo", async () => {
+    const { parseImportedFlow } = await import("./flow-service");
+    const source = structuredClone(apiShapedFlow) as typeof apiShapedFlow & {
+      nodes: (typeof apiShapedFlow.nodes[number] & { metadata?: Record<string, string> })[];
+    };
+    source.nodes[0].metadata = { color: "#ff0000", category: "pagos" };
+    const definition = parseImportedFlow(source);
+    expect(definition.nodes[0].metadata).toEqual({ color: "#ff0000", category: "pagos" });
   });
 });

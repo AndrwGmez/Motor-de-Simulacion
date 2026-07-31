@@ -2,7 +2,7 @@ SHELL := /bin/bash
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install dev dev-api dev-web up down logs contracts lint typecheck test test-all test-api test-api-race test-web test-e2e build compose-build ci clean-generated
+.PHONY: help install dev dev-api dev-web up down logs contracts lint typecheck test test-all test-api test-api-race test-web test-e2e test-e2e-full build compose-build ci clean-generated
 
 help:
 	@awk 'BEGIN {FS = ":.*## "; printf "\nFlowVerse 3D\n\n"} /^[a-zA-Z_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -53,6 +53,15 @@ test-web: ## Ejecuta las pruebas del frontend.
 
 test-e2e: ## Ejecuta la suite Playwright (requiere Chromium instalado).
 	pnpm test:e2e
+
+test-e2e-full: ## Levanta el stack con Compose y ejecuta el recorrido real.
+	docker compose up --build --wait --detach
+	PLAYWRIGHT_BASE_URL=http://localhost:$${WEB_PORT:-3000} \
+	FLOWVERSE_API_URL=http://localhost:$${API_PORT:-8080} \
+	pnpm test:e2e:full; \
+	status=$$?; \
+	docker compose down; \
+	exit $$status
 
 build: ## Compila todos los componentes.
 	pnpm build

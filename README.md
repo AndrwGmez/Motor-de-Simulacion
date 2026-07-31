@@ -56,6 +56,7 @@ nunca se ejecuta ni se persiste automáticamente.
 | `make contracts` | Valida esquemas, especificaciones y fixtures |
 | `make test` | Ejecuta pruebas unitarias de contratos, API y web |
 | `make test-all` | Añade race detector y Playwright |
+| `make test-e2e-full` | Levanta el stack con Compose y recorre la pila real |
 | `make lint` | Ejecuta lint de JavaScript/TypeScript y `go vet` |
 | `make build` | Compila web, paquetes y API |
 | `make compose-build` | Reconstruye ambas imágenes desde cero |
@@ -64,16 +65,17 @@ nunca se ejecuta ni se persiste automáticamente.
 
 ## Verificación actual
 
-El estado actual se verificó con contratos, 30 pruebas web, la suite Go,
-`go test -race`, `go vet`, build, integración del repositorio con PostgreSQL y
-cuatro escenarios Playwright. Los E2E actuales usan el modo demo del frontend;
-el recorrido de navegador contra API/PostgreSQL/WebSocket reales permanece como
-gate posterior.
+El estado actual se verificó con contratos, 50 pruebas web, la suite Go,
+`go test -race`, `go vet`, build, integración del repositorio con PostgreSQL,
+seis escenarios Playwright en modo demo y cinco escenarios Playwright contra la
+pila real levantada con Compose.
 
-También se realizó un smoke manual con PostgreSQL, API y web saludables mediante
-Compose. [La estrategia de pruebas](docs/testing.md) distingue la suite
-implementada de los objetivos pendientes de accesibilidad, carga, cobertura y
-E2E full-stack automatizado.
+La suite full-stack recorre registro, creación de proyecto y flujo, edición
+guardada en la API, simulación ejecutada por el motor de Go con sus eventos
+recibidos por WebSocket, publicación de una versión inmutable y enlace público
+abierto sin sesión. [La estrategia de pruebas](docs/testing.md) distingue la
+suite implementada de los objetivos pendientes de accesibilidad, carga y
+cobertura.
 
 ## Contratos y documentación
 

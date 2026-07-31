@@ -1,8 +1,8 @@
 "use client";
 
 import { create } from "zustand";
-import { DEMO_DOCUMENT } from "@/lib/demo-flow";
-import { applyLayout } from "@/lib/layouts";
+import { DEMO_DOCUMENT } from "@flowverse/core";
+import { applyLayout } from "@flowverse/viewer";
 import {
   createNode,
   type EditableFlow,
@@ -18,8 +18,8 @@ import {
   type RunSummary,
   type SimulationPlan,
   type ValidationIssue,
-} from "@/lib/flow-types";
-import { validateFlow } from "@/lib/validation";
+} from "@flowverse/core";
+import { validateFlow } from "@flowverse/engine";
 
 type SaveStatus = "saved" | "dirty" | "saving" | "error" | "conflict";
 

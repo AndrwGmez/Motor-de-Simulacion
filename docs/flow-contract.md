@@ -42,8 +42,8 @@ Así, importar y exportar no arrastra propiedad ni credenciales.
 | `metadata` | No | Tags y herramienta de origen |
 | `variables` | Sí | Hasta 250 declaraciones |
 | `layout` | Sí | Modo, agrupación y cámara opcional |
-| `nodes` | Sí | 1–500 nodos |
-| `edges` | Sí | 0–1.000 conexiones |
+| `nodes` | Sí | 1–5.000 nodos |
+| `edges` | Sí | 0–10.000 conexiones |
 
 Se rechazan propiedades desconocidas. Esto detecta errores tipográficos y evita
 que cada cliente invente extensiones incompatibles.

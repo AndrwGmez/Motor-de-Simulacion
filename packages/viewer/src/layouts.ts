@@ -1,4 +1,4 @@
-import type { FlowDefinition, LayoutMode, Point3D } from "./flow-types";
+import type { FlowDefinition, LayoutMode, Point3D } from "@flowverse/core";
 
 function stageByNode(flow: FlowDefinition): Map<string, number> {
   const stages = new Map<string, number>();

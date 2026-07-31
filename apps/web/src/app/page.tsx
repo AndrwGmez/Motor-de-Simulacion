@@ -10,7 +10,7 @@ import {
   type AccountUser,
 } from "@/lib/account-service";
 import { createProject, listProjects, type ProjectSummary } from "@/lib/workspace-service";
-import { DEMO_PROJECTS } from "@/lib/demo-flow";
+import { DEMO_PROJECTS } from "@flowverse/core";
 
 const demoStats = [
   ["12", "flujos activos"],

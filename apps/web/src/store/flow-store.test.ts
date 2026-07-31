@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { DEMO_DOCUMENT } from "@/lib/demo-flow";
+import { DEMO_DOCUMENT } from "@flowverse/core";
 import { useFlowStore } from "./flow-store";
 
 describe("flow store", () => {

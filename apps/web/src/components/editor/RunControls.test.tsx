@@ -1,8 +1,8 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DEMO_DOCUMENT } from "@/lib/demo-flow";
-import { createSimulationPlan } from "@/lib/simulation";
+import { DEMO_DOCUMENT } from "@flowverse/core";
+import { createSimulationPlan } from "@flowverse/engine";
 import { useFlowStore } from "@/store/flow-store";
 import { RunControls } from "./RunControls";
 

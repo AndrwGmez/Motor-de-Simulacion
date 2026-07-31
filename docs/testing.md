@@ -17,12 +17,13 @@ La revisión del 30 de julio de 2026 dejó en verde:
 | Área | Verificación actual |
 |---|---|
 | Contratos | 2 pruebas de Node y validación completa de schemas/fixtures |
-| Web | 30 pruebas unitarias y de componentes |
+| Web | 50 pruebas unitarias y de componentes |
 | API | Suite Go completa |
 | Concurrencia Go | `go test -race ./...` |
 | Análisis Go | `go vet ./...` y build del binario |
 | PostgreSQL | Prueba de integración del repositorio con PostgreSQL real |
-| Navegador | 4 escenarios Playwright en modo demo |
+| Navegador | 6 escenarios Playwright en modo demo |
+| Navegador full-stack | 5 escenarios Playwright contra Compose, API, PostgreSQL y WebSocket |
 | Contenedores | Build de las imágenes y smoke manual del stack Compose |
 
 Estos números describen la suite actual, no un umbral contractual permanente.
@@ -104,16 +105,30 @@ No hay todavía un umbral de cobertura frontend activado en CI.
 
 ## 7. E2E implementado
 
-Playwright ejecuta cuatro escenarios con Chromium:
+Hay dos suites Playwright con propósitos distintos.
 
-1. crear un nodo, deshacer y validar el flujo demo;
-2. ejecutar, pausar y avanzar el simulador demo;
-3. abrir importación y comprobar la vista pública de solo lectura;
-4. publicar explícitamente el borrador demo.
+### 7.1 Modo demo (`apps/web/e2e`, `pnpm test:e2e`)
 
-Estos escenarios usan el fallback local del frontend. No registran un usuario
-real, no levantan la API y no prueban PostgreSQL ni un WebSocket real. CI espera
-el build web, inicia Next.js y ejecuta estos cuatro casos.
+Seis escenarios que usan el fallback local del frontend: no registran un usuario
+real, no levantan la API y no tocan PostgreSQL. Cubren la interacción del editor
+de forma rápida y sin dependencias.
+
+### 7.2 Pila real (`apps/web/e2e-fullstack`, `make test-e2e-full`)
+
+Cinco escenarios contra las mismas imágenes que se despliegan, levantadas con
+Docker Compose:
+
+1. registro con sesión persistida en la API;
+2. creación de proyecto y flujo con el editor 3D montado;
+3. edición guardada en la API y conservada al recargar;
+4. simulación ejecutada por el motor de Go con sus eventos recibidos por
+   WebSocket (`run.started` … `run.completed`);
+5. publicación de una versión inmutable y enlace público abierto sin sesión.
+
+Esta suite es la que atraviesa el contrato compartido en ambas direcciones. El
+stack se levanta fuera de Playwright, así que la ejecución local usa
+`make test-e2e-full`; repetir la suite contra un stack ya arrancado puede topar
+con el rate limit de `auth.register`, que se reinicia al recrear el contenedor.
 
 ## 8. Smoke manual full-stack
 
@@ -126,8 +141,9 @@ También se verificó manualmente:
 - API conectada al PostgreSQL del stack;
 - creación y consulta básica mediante la superficie HTTP.
 
-Este smoke confirma que las piezas arrancan juntas. No reemplaza el E2E
-automatizado contra la API real.
+Este smoke confirmó que las piezas arrancan juntas antes de que existiera la
+suite full-stack descrita en 7.2, que ya cubre ese recorrido de forma
+automatizada.
 
 ## 9. CI actual
 
@@ -136,8 +152,9 @@ Los jobs vigentes son:
 1. contratos;
 2. API con PostgreSQL, tests, race detector, vet y build;
 3. web con lint, typecheck, unit tests y build;
-4. los cuatro Playwright demo con Chromium;
-5. build de imágenes Docker después de los gates anteriores.
+4. los seis Playwright demo con Chromium;
+5. los cinco Playwright full-stack contra Compose, API, PostgreSQL y WebSocket;
+6. build de imágenes Docker después de los gates anteriores.
 
 CI genera un `coverage.out` del backend como dato, pero todavía no aplica un
 porcentaje mínimo ni publica tendencias.
@@ -148,8 +165,6 @@ Antes de considerar el MVP endurecido para producción se deben añadir:
 
 ### Integración y E2E real
 
-- recorrido registro → proyecto → flujo → publicación → run → share contra API y
-  PostgreSQL reales;
 - matriz owner/editor/viewer sobre HTTP;
 - dos clientes provocando y recuperando un conflicto ETag;
 - `Idempotency-Key` repetida con payload igual y diferente;
@@ -210,9 +225,10 @@ Para el estado actual, una entrega requiere:
 - contratos, lint, typecheck, pruebas Go/web y build en verde;
 - race detector en verde;
 - integración PostgreSQL en verde dentro de CI;
-- cuatro Playwright demo en verde;
+- seis Playwright demo en verde;
+- cinco Playwright full-stack en verde;
 - imágenes construibles.
 
-Los gates de E2E real, accesibilidad, carga y cobertura se incorporarán cuando
+Los gates de accesibilidad, carga y cobertura se incorporarán cuando
 las suites correspondientes existan; hasta entonces se reportan como backlog y
 no como capacidades verificadas.

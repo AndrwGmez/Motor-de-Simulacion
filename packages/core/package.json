@@ -1,0 +1,30 @@
+{
+  "name": "@flowverse/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Modelo de dominio de FlowVerse: tipos del contrato FlowDefinition y presentación de los tipos de nodo.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsup",
+    "prepublishOnly": "tsup"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "tsup": "^8.5.0"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false
+}

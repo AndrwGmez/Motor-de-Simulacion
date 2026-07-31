@@ -1,0 +1,33 @@
+{
+  "name": "@flowverse/engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Validación estructural y simulación determinista sin depender de la API ni del renderizado.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsup",
+    "prepublishOnly": "tsup"
+  },
+  "dependencies": {
+    "@flowverse/core": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "tsup": "^8.5.0"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false
+}

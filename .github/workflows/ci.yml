@@ -85,6 +85,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile --filter @flowverse/web...
+      # La app consume los paquetes compilados, así que se construyen primero.
+      - run: pnpm --filter "./packages/*" build
       - run: pnpm --filter @flowverse/web lint
       - run: pnpm --filter @flowverse/web typecheck
       - run: pnpm --filter @flowverse/web test
@@ -105,10 +107,45 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile --filter @flowverse/web...
+      - run: pnpm --filter "./packages/*" build
       - name: Install Chromium
         run: pnpm --filter @flowverse/web exec playwright install --with-deps chromium
       - name: Run browser tests
         run: pnpm --filter @flowverse/web test:e2e
+
+  e2e-fullstack:
+    name: Playwright full-stack
+    runs-on: ubuntu-latest
+    needs:
+      - contracts
+      - api
+      - web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --filter @flowverse/web...
+      - run: pnpm --filter "./packages/*" build
+      - name: Install Chromium
+        run: pnpm --filter @flowverse/web exec playwright install --with-deps chromium
+      - name: Start the stack
+        run: docker compose up --build --wait --detach
+      - name: Real browser journey against API, PostgreSQL and WebSocket
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost:3000
+          FLOWVERSE_API_URL: http://localhost:8080
+        run: pnpm test:e2e:full
+      - name: Service logs
+        if: failure()
+        run: docker compose logs --no-color --tail 200
+      - name: Stop the stack
+        if: always()
+        run: docker compose down --volumes
 
   images:
     name: Container images
@@ -118,6 +155,7 @@ jobs:
       - api
       - web
       - e2e
+      - e2e-fullstack
     steps:
       - uses: actions/checkout@v4
       - run: docker compose build

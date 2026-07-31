@@ -1,0 +1,468 @@
+{
+  "schemaVersion": "1.0",
+  "name": "Procesamiento de pedidos",
+  "description": "Ejemplo completo del contrato FlowDefinition 1.0: los ocho tipos de nodo, condiciones estructuradas, un camino por defecto en cada decisión y un ciclo de reintento con salida.",
+  "metadata": {
+    "tags": ["ejemplo", "pedidos"],
+    "createdWith": "samples/pedido-ejemplo.flow.json"
+  },
+  "variables": [
+    {
+      "path": "/payment/status",
+      "type": "string",
+      "required": true,
+      "default": "pending",
+      "description": "Estado devuelto por la pasarela de pago."
+    },
+    {
+      "path": "/payment/attempts",
+      "type": "integer",
+      "required": true,
+      "default": 0,
+      "description": "Intentos de cobro consumidos."
+    },
+    {
+      "path": "/inventory/available",
+      "type": "boolean",
+      "required": true,
+      "default": false,
+      "description": "Indica si hay existencias para el pedido."
+    },
+    {
+      "path": "/order/sku",
+      "type": "string",
+      "required": false,
+      "default": "SKU-1024",
+      "description": "Referencia del artículo solicitado; el nodo de datos la copia al inventario."
+    }
+  ],
+  "layout": {
+    "mode": "directional"
+  },
+  "nodes": [
+    {
+      "id": "pedido_recibido",
+      "type": "trigger",
+      "label": "Pedido recibido",
+      "description": "Entra un pedido nuevo desde la tienda.",
+      "inputs": [],
+      "outputs": [{ "id": "salida", "label": "Salida" }],
+      "activationMode": "each",
+      "durationMs": 0,
+      "configuration": { "eventName": "order.created" },
+      "position": { "x": -720, "y": 0, "z": 0 },
+      "locked": false,
+      "metadata": { "category": "entrada", "color": "#7F8CFF" }
+    },
+    {
+      "id": "registrar_pedido",
+      "type": "data",
+      "label": "Registrar pedido",
+      "description": "Deja el pedido en estado recibido.",
+      "inputs": [{ "id": "entrada", "label": "Entrada" }],
+      "outputs": [{ "id": "salida", "label": "Salida" }],
+      "activationMode": "each",
+      "durationMs": 120,
+      "configuration": {
+        "operations": [
+          { "op": "set", "path": "/order/status", "value": "received" }
+        ]
+      },
+      "position": { "x": -560, "y": 0, "z": 0 },
+      "locked": false,
+      "metadata": { "category": "datos", "color": "#36C6D8" }
+    },
+    {
+      "id": "bloque_pagos",
+      "type": "group",
+      "label": "Cobro",
+      "description": "Agrupa visualmente la validación y el reintento del pago.",
+      "inputs": [],
+      "outputs": [],
+      "activationMode": "each",
+      "durationMs": 0,
+      "configuration": { "collapsed": false },
+      "position": { "x": -260, "y": -40, "z": 0 },
+      "locked": true,
+      "metadata": { "category": "pagos", "color": "#8993AD" }
+    },
+    {
+      "id": "validar_pago",
+      "type": "process",
+      "label": "Validar pago",
+      "inputs": [{ "id": "entrada", "label": "Entrada" }],
+      "outputs": [{ "id": "salida", "label": "Salida" }],
+      "activationMode": "each",
+      "durationMs": 250,
+      "configuration": {
+        "operations": [
+          { "op": "set", "path": "/payment/checked", "value": true }
+        ]
+      },
+      "position": { "x": -400, "y": 0, "z": 0 },
+      "locked": false,
+      "metadata": { "category": "pagos", "color": "#4D8DFF", "groupId": "bloque_pagos" }
+    },
+    {
+      "id": "pasarela_pago",
+      "type": "integration",
+      "label": "Pasarela de pago",
+      "description": "Servicio externo simulado; no ejecuta cobros reales.",
+      "inputs": [{ "id": "entrada", "label": "Entrada" }],
+      "outputs": [{ "id": "salida", "label": "Salida" }],
+      "activationMode": "each",
+      "durationMs": 0,
+      "configuration": {
+        "service": "Pasarela de pagos",
+        "latencyMs": 400,
+        "outcome": "success",
+        "response": { "authorized": true }
+      },
+      "position": { "x": -240, "y": 0, "z": 0 },
+      "locked": false,
+      "metadata": { "category": "pagos", "color": "#F49A59", "groupId": "bloque_pagos" }
+    },
+    {
+      "id": "pago_aprobado",
+      "type": "decision",
+      "label": "¿Pago aprobado?",
+      "inputs": [{ "id": "entrada", "label": "Entrada" }],
+      "outputs": [
+        { "id": "aprobado", "label": "Aprobado" },
+        { "id": "rechazado", "label": "Rechazado" }
+      ],
+      "activationMode": "each",
+      "durationMs": 40,
+      "configuration": { "strategy": "first_match" },
+      "position": { "x": -80, "y": 0, "z": 0 },
+      "locked": false,
+      "metadata": { "category": "pagos", "color": "#B078FF", "groupId": "bloque_pagos" }
+    },
+    {
+      "id": "puede_reintentar",
+      "type": "decision",
+      "label": "¿Quedan reintentos?",
+      "inputs": [{ "id": "entrada", "label": "Entrada" }],
+      "outputs": [
+        { "id": "reintentar", "label": "Reintentar" },
+        { "id": "abandonar", "label": "Abandonar" }
+      ],
+      "activationMode": "each",
+      "durationMs": 30,
+      "configuration": { "strategy": "first_match" },
+      "position": { "x": -80, "y": -200, "z": 120 },
+      "locked": false,
+      "metadata": { "category": "pagos", "color": "#B078FF", "groupId": "bloque_pagos" }
+    },
+    {
+      "id": "reintentar_pago",
+      "type": "process",
+      "label": "Reintentar cobro",
+      "description": "Cierra el ciclo devolviendo el flujo a la validación.",
+      "inputs": [{ "id": "entrada", "label": "Entrada" }],
+      "outputs": [{ "id": "salida", "label": "Salida" }],
+      "activationMode": "each",
+      "durationMs": 180,
+      "configuration": {
+        "operations": [
+          { "op": "set", "path": "/payment/status", "value": "retrying" }
+        ]
+      },
+      "position": { "x": -400, "y": -200, "z": 120 },
+      "locked": false,
+      "metadata": { "category": "pagos", "color": "#4D8DFF", "groupId": "bloque_pagos" }
+    },
+    {
+      "id": "revisar_inventario",
+      "type": "data",
+      "label": "Revisar inventario",
+      "inputs": [{ "id": "entrada", "label": "Entrada" }],
+      "outputs": [{ "id": "salida", "label": "Salida" }],
+      "activationMode": "each",
+      "durationMs": 150,
+      "configuration": {
+        "operations": [
+          { "op": "copy", "from": "/order/sku", "path": "/inventory/sku" }
+        ]
+      },
+      "position": { "x": 80, "y": 0, "z": 0 },
+      "locked": false,
+      "metadata": { "category": "almacen", "color": "#36C6D8" }
+    },
+    {
+      "id": "hay_inventario",
+      "type": "decision",
+      "label": "¿Hay existencias?",
+      "inputs": [{ "id": "entrada", "label": "Entrada" }],
+      "outputs": [
+        { "id": "disponible", "label": "Disponible" },
+        { "id": "agotado", "label": "Agotado" }
+      ],
+      "activationMode": "each",
+      "durationMs": 40,
+      "configuration": { "strategy": "first_match" },
+      "position": { "x": 240, "y": 0, "z": 0 },
+      "locked": false,
+      "metadata": { "category": "almacen", "color": "#B078FF" }
+    },
+    {
+      "id": "preparar_pedido",
+      "type": "process",
+      "label": "Preparar pedido",
+      "inputs": [{ "id": "entrada", "label": "Entrada" }],
+      "outputs": [{ "id": "salida", "label": "Salida" }],
+      "activationMode": "each",
+      "durationMs": 900,
+      "configuration": {
+        "operations": [
+          { "op": "set", "path": "/order/status", "value": "packing" }
+        ]
+      },
+      "position": { "x": 400, "y": 120, "z": 0 },
+      "locked": false,
+      "metadata": { "category": "almacen", "color": "#4D8DFF" }
+    },
+    {
+      "id": "espera_transportista",
+      "type": "delay",
+      "label": "Esperar transportista",
+      "description": "Avanza el tiempo lógico una hora.",
+      "inputs": [{ "id": "entrada", "label": "Entrada" }],
+      "outputs": [{ "id": "salida", "label": "Salida" }],
+      "activationMode": "each",
+      "durationMs": 0,
+      "configuration": { "delayMs": 3600000 },
+      "position": { "x": 560, "y": 120, "z": 0 },
+      "locked": false,
+      "metadata": { "category": "logistica", "color": "#F2C15D" }
+    },
+    {
+      "id": "notificar_cliente",
+      "type": "integration",
+      "label": "Notificar al cliente",
+      "inputs": [{ "id": "entrada", "label": "Entrada" }],
+      "outputs": [{ "id": "salida", "label": "Salida" }],
+      "activationMode": "each",
+      "durationMs": 0,
+      "configuration": {
+        "service": "Correo transaccional",
+        "latencyMs": 200,
+        "outcome": "success"
+      },
+      "position": { "x": 720, "y": 120, "z": 0 },
+      "locked": false,
+      "metadata": { "category": "logistica", "color": "#F49A59" }
+    },
+    {
+      "id": "entregado",
+      "type": "end",
+      "label": "Pedido entregado",
+      "inputs": [{ "id": "entrada", "label": "Entrada" }],
+      "outputs": [],
+      "activationMode": "each",
+      "durationMs": 0,
+      "configuration": { "result": "success" },
+      "position": { "x": 880, "y": 120, "z": 0 },
+      "locked": false,
+      "metadata": { "category": "resultado", "color": "#35D39D" }
+    },
+    {
+      "id": "reembolsar",
+      "type": "integration",
+      "label": "Devolver el dinero",
+      "inputs": [{ "id": "entrada", "label": "Entrada" }],
+      "outputs": [{ "id": "salida", "label": "Salida" }],
+      "activationMode": "each",
+      "durationMs": 0,
+      "configuration": {
+        "service": "Pasarela de pagos",
+        "latencyMs": 800,
+        "outcome": "success"
+      },
+      "position": { "x": 560, "y": -160, "z": 0 },
+      "locked": false,
+      "metadata": { "category": "pagos", "color": "#F49A59" }
+    },
+    {
+      "id": "reembolsado",
+      "type": "end",
+      "label": "Pedido reembolsado",
+      "inputs": [{ "id": "entrada", "label": "Entrada" }],
+      "outputs": [],
+      "activationMode": "each",
+      "durationMs": 0,
+      "configuration": { "result": "failure" },
+      "position": { "x": 880, "y": -160, "z": 0 },
+      "locked": false,
+      "metadata": { "category": "resultado", "color": "#FF6B6B" }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e01",
+      "source": "pedido_recibido",
+      "target": "registrar_pedido",
+      "sourcePort": "salida",
+      "targetPort": "entrada",
+      "priority": 0,
+      "isDefault": false
+    },
+    {
+      "id": "e02",
+      "source": "registrar_pedido",
+      "target": "validar_pago",
+      "sourcePort": "salida",
+      "targetPort": "entrada",
+      "priority": 0,
+      "isDefault": false
+    },
+    {
+      "id": "e03",
+      "source": "validar_pago",
+      "target": "pasarela_pago",
+      "sourcePort": "salida",
+      "targetPort": "entrada",
+      "priority": 0,
+      "isDefault": false
+    },
+    {
+      "id": "e04",
+      "source": "pasarela_pago",
+      "target": "pago_aprobado",
+      "sourcePort": "salida",
+      "targetPort": "entrada",
+      "priority": 0,
+      "isDefault": false
+    },
+    {
+      "id": "e05",
+      "source": "pago_aprobado",
+      "target": "revisar_inventario",
+      "sourcePort": "aprobado",
+      "targetPort": "entrada",
+      "label": "Sí",
+      "condition": {
+        "field": "/payment/status",
+        "operator": "equals",
+        "value": "approved"
+      },
+      "priority": 1,
+      "isDefault": false
+    },
+    {
+      "id": "e06",
+      "source": "pago_aprobado",
+      "target": "puede_reintentar",
+      "sourcePort": "rechazado",
+      "targetPort": "entrada",
+      "label": "No",
+      "priority": 2,
+      "isDefault": true
+    },
+    {
+      "id": "e07",
+      "source": "puede_reintentar",
+      "target": "reintentar_pago",
+      "sourcePort": "reintentar",
+      "targetPort": "entrada",
+      "label": "Quedan intentos",
+      "condition": {
+        "field": "/payment/attempts",
+        "operator": "less_than",
+        "value": 3
+      },
+      "priority": 1,
+      "isDefault": false
+    },
+    {
+      "id": "e08",
+      "source": "puede_reintentar",
+      "target": "reembolsar",
+      "sourcePort": "abandonar",
+      "targetPort": "entrada",
+      "label": "Sin intentos",
+      "priority": 2,
+      "isDefault": true
+    },
+    {
+      "id": "e09",
+      "source": "reintentar_pago",
+      "target": "validar_pago",
+      "sourcePort": "salida",
+      "targetPort": "entrada",
+      "label": "Reintento",
+      "priority": 0,
+      "isDefault": false
+    },
+    {
+      "id": "e10",
+      "source": "revisar_inventario",
+      "target": "hay_inventario",
+      "sourcePort": "salida",
+      "targetPort": "entrada",
+      "priority": 0,
+      "isDefault": false
+    },
+    {
+      "id": "e11",
+      "source": "hay_inventario",
+      "target": "preparar_pedido",
+      "sourcePort": "disponible",
+      "targetPort": "entrada",
+      "label": "Sí",
+      "condition": {
+        "field": "/inventory/available",
+        "operator": "equals",
+        "value": true
+      },
+      "priority": 1,
+      "isDefault": false
+    },
+    {
+      "id": "e12",
+      "source": "hay_inventario",
+      "target": "reembolsar",
+      "sourcePort": "agotado",
+      "targetPort": "entrada",
+      "label": "No",
+      "priority": 2,
+      "isDefault": true
+    },
+    {
+      "id": "e13",
+      "source": "preparar_pedido",
+      "target": "espera_transportista",
+      "sourcePort": "salida",
+      "targetPort": "entrada",
+      "priority": 0,
+      "isDefault": false
+    },
+    {
+      "id": "e14",
+      "source": "espera_transportista",
+      "target": "notificar_cliente",
+      "sourcePort": "salida",
+      "targetPort": "entrada",
+      "priority": 0,
+      "isDefault": false
+    },
+    {
+      "id": "e15",
+      "source": "notificar_cliente",
+      "target": "entregado",
+      "sourcePort": "salida",
+      "targetPort": "entrada",
+      "priority": 0,
+      "isDefault": false
+    },
+    {
+      "id": "e16",
+      "source": "reembolsar",
+      "target": "reembolsado",
+      "sourcePort": "salida",
+      "targetPort": "entrada",
+      "priority": 0,
+      "isDefault": false
+    }
+  ]
+}

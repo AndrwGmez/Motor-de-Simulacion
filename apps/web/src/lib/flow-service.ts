@@ -1,8 +1,8 @@
 import Ajv2020 from "ajv/dist/2020";
 import addFormats from "ajv-formats";
 import flowDefinitionSchema from "../../../../packages/contracts/schemas/flow-definition.schema.json";
-import { DEMO_DOCUMENT } from "./demo-flow";
-import { createSimulationPlan } from "./simulation";
+import { DEMO_DOCUMENT } from "@flowverse/core";
+import { createSimulationPlan } from "@flowverse/engine";
 import type {
   EditableFlow,
   FlowDefinition,
@@ -10,7 +10,7 @@ import type {
   RunSummary,
   SimulationOverrides,
   SimulationPlan,
-} from "./flow-types";
+} from "@flowverse/core";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "");
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL?.replace(/\/$/, "");
@@ -144,7 +144,13 @@ export function parseImportedFlow(value: unknown): FlowDefinition {
       .join("; ");
     throw new Error(`El archivo no cumple el contrato FlowDefinition 1.0${details ? `: ${details}` : "."}`);
   }
-  return structuredClone(candidate);
+  const definition = structuredClone(candidate);
+  // `metadata` es opcional en el contrato y la API lo omite cuando está vacío,
+  // pero el editor y las distribuciones lo leen sin comprobarlo.
+  for (const node of definition.nodes) {
+    if (!node.metadata) node.metadata = {};
+  }
+  return definition;
 }
 
 function isEditableFlow(value: unknown): value is EditableFlow {

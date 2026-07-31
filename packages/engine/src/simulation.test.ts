@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEMO_FLOW } from "./demo-flow";
+import { DEMO_FLOW } from "@flowverse/core";
 import { createSimulationPlan, evaluateCondition } from "./simulation";
 
 describe("evaluateCondition", () => {

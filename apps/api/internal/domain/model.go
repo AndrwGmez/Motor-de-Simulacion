@@ -7,8 +7,8 @@ import (
 
 const (
 	SchemaVersion = "1.0"
-	MaxNodes      = 500
-	MaxEdges      = 1000
+	MaxNodes      = 5000
+	MaxEdges      = 10000
 )
 
 type NodeType string
@@ -96,7 +96,7 @@ type Edge struct {
 	TargetPort string     `json:"targetPort,omitempty"`
 	Label      string     `json:"label,omitempty"`
 	Condition  *Condition `json:"condition,omitempty"`
-	Priority   int        `json:"priority,omitempty"`
+	Priority   int        `json:"priority"`
 	Default    bool       `json:"isDefault"`
 }
 

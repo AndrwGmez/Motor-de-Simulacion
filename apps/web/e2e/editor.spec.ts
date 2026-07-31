@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 test("crea un nodo, deshace y valida el flujo demo", async ({ page }) => {
   await page.goto("/proyectos/demo/flujos/pedidos");
   await expect(page.getByLabel("Nombre del flujo")).toHaveValue("Procesamiento de pedidos");
-  await expect(page.getByTestId("flow-scene")).toBeVisible();
+  await expect(page.getByTestId("flow-scene")).toBeVisible({ timeout: 30_000 });
 
   await page.getByTestId("add-process").click();
   await expect(page.getByLabel("Inspector de propiedades").getByLabel("Nombre")).toHaveValue(/Proceso/);

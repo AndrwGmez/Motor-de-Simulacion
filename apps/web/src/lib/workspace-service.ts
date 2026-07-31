@@ -1,5 +1,5 @@
-import { DEMO_FLOW, DEMO_PROJECTS } from "./demo-flow";
-import type { EditableFlow, FlowDefinition } from "./flow-types";
+import { DEMO_FLOW, DEMO_PROJECTS } from "@flowverse/core";
+import type { EditableFlow, FlowDefinition } from "@flowverse/core";
 
 export interface ProjectSummary {
   id: string;
