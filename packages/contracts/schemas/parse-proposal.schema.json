@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://flowverse.dev/schemas/parse-proposal.schema.json",
+  "title": "FlowVerse ParseProposal",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "proposal",
+    "warnings",
+    "ambiguities",
+    "provider"
+  ],
+  "properties": {
+    "proposal": {
+      "$ref": "https://flowverse.dev/schemas/flow-definition.schema.json"
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 500
+      }
+    },
+    "ambiguities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "question",
+          "suggestedResolution"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "question": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "suggestedResolution": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      }
+    },
+    "provider": {
+      "enum": [
+        "mock",
+        "openai"
+      ]
+    }
+  }
+}

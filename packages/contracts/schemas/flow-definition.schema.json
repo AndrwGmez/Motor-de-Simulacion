@@ -1,0 +1,785 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://flowverse.dev/schemas/flow-definition.schema.json",
+  "title": "FlowVerse FlowDefinition",
+  "description": "Documento canónico e inmutable una vez publicado.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "name",
+    "variables",
+    "layout",
+    "nodes",
+    "edges"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 4000,
+      "default": ""
+    },
+    "metadata": {
+      "$ref": "#/$defs/flowMetadata"
+    },
+    "variables": {
+      "type": "array",
+      "maxItems": 250,
+      "items": {
+        "$ref": "#/$defs/variable"
+      }
+    },
+    "layout": {
+      "$ref": "#/$defs/layout"
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 500,
+      "items": {
+        "$ref": "#/$defs/node"
+      }
+    },
+    "edges": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": {
+        "$ref": "#/$defs/edge"
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+    },
+    "jsonPointer": {
+      "type": "string",
+      "pattern": "^(?:/(?:[^~/]|~0|~1)*)*$",
+      "maxLength": 512
+    },
+    "position": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "z"
+      ],
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": -100000,
+          "maximum": 100000
+        },
+        "y": {
+          "type": "number",
+          "minimum": -100000,
+          "maximum": 100000
+        },
+        "z": {
+          "type": "number",
+          "minimum": -100000,
+          "maximum": 100000
+        }
+      }
+    },
+    "camera": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "position",
+        "target"
+      ],
+      "properties": {
+        "position": {
+          "$ref": "#/$defs/position"
+        },
+        "target": {
+          "$ref": "#/$defs/position"
+        }
+      }
+    },
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "force",
+            "directional",
+            "layers",
+            "timeline",
+            "clusters",
+            "execution"
+          ]
+        },
+        "clusterBy": {
+          "enum": [
+            "category",
+            "type",
+            "group"
+          ]
+        },
+        "camera": {
+          "$ref": "#/$defs/camera"
+        }
+      }
+    },
+    "flowMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tags": {
+          "type": "array",
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "createdWith": {
+          "type": "string",
+          "maxLength": 80
+        }
+      }
+    },
+    "variable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "type",
+        "required"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/jsonPointer"
+        },
+        "type": {
+          "enum": [
+            "string",
+            "number",
+            "integer",
+            "boolean",
+            "object",
+            "array",
+            "null"
+          ]
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "default": true
+      }
+    },
+    "port": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        }
+      }
+    },
+    "operation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "path",
+            "value"
+          ],
+          "properties": {
+            "op": {
+              "const": "set"
+            },
+            "path": {
+              "$ref": "#/$defs/jsonPointer"
+            },
+            "value": true
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "from",
+            "path"
+          ],
+          "properties": {
+            "op": {
+              "const": "copy"
+            },
+            "from": {
+              "$ref": "#/$defs/jsonPointer"
+            },
+            "path": {
+              "$ref": "#/$defs/jsonPointer"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "path"
+          ],
+          "properties": {
+            "op": {
+              "const": "delete"
+            },
+            "path": {
+              "$ref": "#/$defs/jsonPointer"
+            }
+          }
+        }
+      ]
+    },
+    "triggerConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "eventName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        }
+      }
+    },
+    "processConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operations": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/operation"
+          }
+        }
+      }
+    },
+    "decisionConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "strategy"
+      ],
+      "properties": {
+        "strategy": {
+          "enum": [
+            "first_match",
+            "all_matches"
+          ]
+        }
+      }
+    },
+    "dataConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operations"
+      ],
+      "properties": {
+        "operations": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/operation"
+          }
+        }
+      }
+    },
+    "integrationConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "latencyMs",
+        "outcome"
+      ],
+      "properties": {
+        "service": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "latencyMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 86400000
+        },
+        "outcome": {
+          "enum": [
+            "success",
+            "failure"
+          ]
+        },
+        "response": true,
+        "errorCode": {
+          "type": "string",
+          "maxLength": 100
+        }
+      }
+    },
+    "delayConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "delayMs"
+      ],
+      "properties": {
+        "delayMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 31536000000
+        }
+      }
+    },
+    "endConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "result"
+      ],
+      "properties": {
+        "result": {
+          "enum": [
+            "success",
+            "failure"
+          ]
+        },
+        "output": true
+      }
+    },
+    "groupConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "collapsed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "nodeMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "color": {
+          "type": "string",
+          "pattern": "^#[0-9A-Fa-f]{6}$"
+        },
+        "tags": {
+          "type": "array",
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "groupId": {
+          "$ref": "#/$defs/identifier"
+        }
+      }
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "label",
+        "inputs",
+        "outputs",
+        "activationMode",
+        "durationMs",
+        "configuration",
+        "position",
+        "locked"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "type": {
+          "enum": [
+            "trigger",
+            "process",
+            "decision",
+            "data",
+            "integration",
+            "delay",
+            "end",
+            "group"
+          ]
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 2000,
+          "default": ""
+        },
+        "inputs": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/port"
+          }
+        },
+        "outputs": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/port"
+          }
+        },
+        "activationMode": {
+          "enum": [
+            "each",
+            "any",
+            "all"
+          ]
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 86400000
+        },
+        "configuration": {
+          "type": "object"
+        },
+        "position": {
+          "$ref": "#/$defs/position"
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "metadata": {
+          "$ref": "#/$defs/nodeMetadata"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "trigger"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "configuration": {
+                "$ref": "#/$defs/triggerConfiguration"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "process"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "configuration": {
+                "$ref": "#/$defs/processConfiguration"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "decision"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "configuration": {
+                "$ref": "#/$defs/decisionConfiguration"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "data"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "configuration": {
+                "$ref": "#/$defs/dataConfiguration"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "integration"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "configuration": {
+                "$ref": "#/$defs/integrationConfiguration"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "delay"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "configuration": {
+                "$ref": "#/$defs/delayConfiguration"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "end"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "configuration": {
+                "$ref": "#/$defs/endConfiguration"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "group"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "configuration": {
+                "$ref": "#/$defs/groupConfiguration"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "comparisonCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field",
+        "operator",
+        "value"
+      ],
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/jsonPointer"
+        },
+        "operator": {
+          "enum": [
+            "equals",
+            "not_equals",
+            "greater_than",
+            "greater_than_or_equal",
+            "less_than",
+            "less_than_or_equal",
+            "contains",
+            "not_contains"
+          ]
+        },
+        "value": true
+      }
+    },
+    "existenceCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field",
+        "operator"
+      ],
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/jsonPointer"
+        },
+        "operator": {
+          "enum": [
+            "exists",
+            "not_exists"
+          ]
+        }
+      }
+    },
+    "compoundCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operator",
+        "conditions"
+      ],
+      "properties": {
+        "operator": {
+          "enum": [
+            "and",
+            "or"
+          ]
+        },
+        "conditions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/condition"
+          }
+        }
+      }
+    },
+    "condition": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/comparisonCondition"
+        },
+        {
+          "$ref": "#/$defs/existenceCondition"
+        },
+        {
+          "$ref": "#/$defs/compoundCondition"
+        }
+      ]
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "source",
+        "target",
+        "sourcePort",
+        "targetPort",
+        "priority",
+        "isDefault"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "source": {
+          "$ref": "#/$defs/identifier"
+        },
+        "target": {
+          "$ref": "#/$defs/identifier"
+        },
+        "sourcePort": {
+          "$ref": "#/$defs/identifier"
+        },
+        "targetPort": {
+          "$ref": "#/$defs/identifier"
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "condition": {
+          "$ref": "#/$defs/condition"
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "isDefault": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

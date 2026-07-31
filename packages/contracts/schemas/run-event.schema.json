@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://flowverse.dev/schemas/run-event.schema.json",
+  "title": "FlowVerse RunEvent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "type",
+    "runId",
+    "sequence",
+    "occurredAt",
+    "logicalTimeMs",
+    "payload"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "type": {
+      "enum": [
+        "run.started",
+        "node.queued",
+        "node.started",
+        "node.waiting",
+        "edge.traversed",
+        "node.completed",
+        "node.failed",
+        "node.skipped",
+        "run.paused",
+        "run.resumed",
+        "run.completed",
+        "run.failed",
+        "run.limit_exceeded",
+        "run.cancelled",
+        "run.interrupted"
+      ]
+    },
+    "runId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "logicalTimeMs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "payload": {
+      "type": "object",
+      "properties": {
+        "nodeId": {
+          "type": "string"
+        },
+        "edgeId": {
+          "type": "string"
+        },
+        "tokenId": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

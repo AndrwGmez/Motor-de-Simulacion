@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "1.0",
+  "name": "Fixture inválido",
+  "variables": [],
+  "layout": {
+    "mode": "force"
+  },
+  "nodes": [
+    {
+      "id": "invalid-node",
+      "type": "script",
+      "label": "Nunca debe aceptarse",
+      "inputs": [],
+      "outputs": [],
+      "activationMode": "each",
+      "durationMs": 0,
+      "configuration": {},
+      "position": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "locked": false
+    }
+  ],
+  "edges": []
+}
+

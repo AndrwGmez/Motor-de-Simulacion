@@ -1,0 +1,9 @@
+{
+  "description": "Parámetros deterministas del fixture de rendimiento. El documento completo se genera por stdout para no versionar datos repetitivos.",
+  "schemaVersion": "1.0",
+  "seed": 317,
+  "nodeCount": 500,
+  "edgeCount": 1000,
+  "command": "pnpm --filter @flowverse/contracts fixture:large > /tmp/flowverse-500-1000.flow.json"
+}
+

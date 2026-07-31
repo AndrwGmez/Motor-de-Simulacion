@@ -1,0 +1,33 @@
+{
+  "name": "@flowverse/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "schemas",
+    "fixtures",
+    "openapi.yaml",
+    "asyncapi.yaml"
+  ],
+  "exports": {
+    "./flow-definition.schema.json": "./schemas/flow-definition.schema.json",
+    "./run-event.schema.json": "./schemas/run-event.schema.json",
+    "./simulation-request.schema.json": "./schemas/simulation-request.schema.json",
+    "./parse-proposal.schema.json": "./schemas/parse-proposal.schema.json",
+    "./openapi.yaml": "./openapi.yaml",
+    "./asyncapi.yaml": "./asyncapi.yaml"
+  },
+  "scripts": {
+    "check": "node ./scripts/validate-contracts.mjs",
+    "test": "node --test ./test/*.test.mjs",
+    "lint": "node --check ./scripts/validate-contracts.mjs && node --check ./scripts/generate-large-fixture.mjs",
+    "typecheck": "node --check ./scripts/validate-contracts.mjs && node --check ./scripts/generate-large-fixture.mjs",
+    "fixture:large": "node ./scripts/generate-large-fixture.mjs"
+  },
+  "devDependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "yaml": "^2.8.1"
+  }
+}
+

@@ -1,0 +1,7 @@
+.git
+.env
+coverage.out
+/api
+flowverse-api
+*.test
+*.log

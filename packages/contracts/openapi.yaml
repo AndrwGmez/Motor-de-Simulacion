@@ -1,0 +1,1499 @@
+openapi: 3.1.0
+info:
+  title: FlowVerse 3D HTTP API
+  version: 0.1.0
+  summary: API para diseño, versionado, validación y simulación de flujos.
+  description: |
+    Contrato HTTP canónico del MVP. La autenticación utiliza cookies HttpOnly
+    opacas. Toda mutación autenticada debe incluir `X-CSRF-Token`. Los errores
+    comparten un sobre estable y cada respuesta incluye `X-Request-Id`.
+servers:
+  - url: http://localhost:8080
+    description: Desarrollo local
+tags:
+  - name: Health
+  - name: Auth
+  - name: Projects
+  - name: Flows
+  - name: Versions
+  - name: Parsing
+  - name: Runs
+  - name: Shares
+
+security:
+  - cookieAuth: []
+
+paths:
+  /health/live:
+    get:
+      tags: [Health]
+      operationId: getLiveness
+      summary: Comprueba que el proceso está vivo.
+      security: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Health"
+
+  /health/ready:
+    get:
+      tags: [Health]
+      operationId: getReadiness
+      summary: Comprueba dependencias necesarias.
+      security: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Health"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/auth/register:
+    post:
+      tags: [Auth]
+      operationId: register
+      summary: Crea un usuario y una sesión.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          $ref: "#/components/responses/Session"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /v1/auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      summary: Inicia una sesión.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/Session"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/auth/refresh:
+    post:
+      tags: [Auth]
+      operationId: refreshSession
+      summary: Rota el refresh token y renueva la sesión.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          $ref: "#/components/responses/Session"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      summary: Revoca la sesión actual.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Sesión revocada.
+
+  /v1/auth/me:
+    get:
+      tags: [Auth]
+      operationId: getCurrentUser
+      summary: Obtiene el usuario de la sesión actual.
+      responses:
+        "200":
+          description: Usuario actual.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/projects:
+    get:
+      tags: [Projects]
+      operationId: listProjects
+      summary: Lista proyectos visibles para el usuario.
+      responses:
+        "200":
+          description: Lista paginada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectList"
+    post:
+      tags: [Projects]
+      operationId: createProject
+      summary: Crea un proyecto cuyo owner es el usuario actual.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectInput"
+      responses:
+        "201":
+          description: Proyecto creado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /v1/projects/{projectId}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      tags: [Projects]
+      operationId: getProject
+      summary: Obtiene un proyecto.
+      responses:
+        "200":
+          description: Proyecto.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [Projects]
+      operationId: updateProject
+      summary: Cambia nombre o descripción.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectInput"
+      responses:
+        "200":
+          description: Proyecto actualizado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Projects]
+      operationId: deleteProject
+      summary: Elimina lógicamente un proyecto.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Proyecto eliminado.
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /v1/projects/{projectId}/members:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      tags: [Projects]
+      operationId: listProjectMembers
+      summary: Lista miembros y roles.
+      responses:
+        "200":
+          description: Miembros.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProjectMember"
+    post:
+      tags: [Projects]
+      operationId: addProjectMember
+      summary: Añade un usuario registrado como editor o viewer.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddMemberRequest"
+      responses:
+        "201":
+          description: Miembro añadido.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectMember"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/projects/{projectId}/flows:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      tags: [Flows]
+      operationId: listFlows
+      summary: Lista los flujos del proyecto.
+      responses:
+        "200":
+          description: Flujos.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FlowSummary"
+    post:
+      tags: [Flows]
+      operationId: createFlow
+      summary: Crea un flujo con borrador inicial.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFlowRequest"
+      responses:
+        "201":
+          description: Flujo creado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlowSummary"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /v1/flows/{flowId}:
+    parameters:
+      - $ref: "#/components/parameters/FlowId"
+    get:
+      tags: [Flows]
+      operationId: getFlow
+      summary: Obtiene identidad y estado del flujo.
+      responses:
+        "200":
+          description: Flujo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlowSummary"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [Flows]
+      operationId: updateFlow
+      summary: Cambia metadatos permanentes del flujo.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FlowMetadataInput"
+      responses:
+        "200":
+          description: Flujo actualizado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlowSummary"
+    delete:
+      tags: [Flows]
+      operationId: deleteFlow
+      summary: Elimina lógicamente el flujo.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Flujo eliminado.
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /v1/flows/{flowId}/draft:
+    parameters:
+      - $ref: "#/components/parameters/FlowId"
+    get:
+      tags: [Versions]
+      operationId: getFlowDraft
+      summary: Obtiene el borrador activo con ETag.
+      responses:
+        "200":
+          description: Documento editable.
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "./schemas/flow-definition.schema.json"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Versions]
+      operationId: replaceFlowDraft
+      summary: Reemplaza el borrador aplicando control optimista.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "./schemas/flow-definition.schema.json"
+      responses:
+        "200":
+          description: Borrador guardado.
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "./schemas/flow-definition.schema.json"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /v1/flows/{flowId}/versions:
+    parameters:
+      - $ref: "#/components/parameters/FlowId"
+    get:
+      tags: [Versions]
+      operationId: listFlowVersions
+      summary: Lista versiones publicadas.
+      responses:
+        "200":
+          description: Versiones ordenadas de reciente a antigua.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FlowVersion"
+
+  /v1/flows/{flowId}/publish:
+    parameters:
+      - $ref: "#/components/parameters/FlowId"
+    post:
+      tags: [Versions]
+      operationId: publishFlowDraft
+      summary: Valida y publica una copia inmutable del borrador.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "201":
+          description: Versión publicada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlowVersion"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /v1/flow-versions/{versionId}:
+    parameters:
+      - $ref: "#/components/parameters/VersionId"
+    get:
+      tags: [Versions]
+      operationId: getFlowVersion
+      summary: Obtiene una versión inmutable.
+      responses:
+        "200":
+          description: Versión y documento.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version, definition]
+                properties:
+                  version:
+                    $ref: "#/components/schemas/FlowVersion"
+                  definition:
+                    $ref: "./schemas/flow-definition.schema.json"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/flow-versions/{versionId}/validate:
+    parameters:
+      - $ref: "#/components/parameters/VersionId"
+    post:
+      tags: [Versions]
+      operationId: validateFlowVersion
+      summary: Ejecuta validación estructural y semántica.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: Resultado de validación.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationReport"
+
+  /v1/flow-versions/{versionId}/analysis:
+    parameters:
+      - $ref: "#/components/parameters/VersionId"
+    get:
+      tags: [Versions]
+      operationId: analyzeFlowVersion
+      summary: Calcula métricas estáticas del grafo.
+      responses:
+        "200":
+          description: Análisis.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlowAnalysis"
+
+  /v1/flows/import:
+    post:
+      tags: [Parsing]
+      operationId: previewFlowImport
+      summary: Valida un documento JSON sin persistirlo.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "./schemas/flow-definition.schema.json"
+      responses:
+        "200":
+          description: Previsualización normalizada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportPreview"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /v1/flows/parse-text:
+    post:
+      tags: [Parsing]
+      operationId: previewFlowFromText
+      summary: Convierte texto en una propuesta no persistida.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ParseTextRequest"
+      responses:
+        "200":
+          description: Propuesta validada.
+          content:
+            application/json:
+              schema:
+                $ref: "./schemas/parse-proposal.schema.json"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/UpstreamFailed"
+
+  /v1/flow-versions/{versionId}/runs:
+    parameters:
+      - $ref: "#/components/parameters/VersionId"
+    post:
+      tags: [Runs]
+      operationId: createRun
+      summary: Inicia una simulación determinista.
+      description: |
+        Crea una ejecución sobre una versión publicada e inmutable. La clave
+        idempotente tiene alcance por usuario autenticado, versionId y key
+        durante 24 horas. Repetir el mismo body devuelve el run existente con
+        200; reutilizar la key en ese alcance con otro body devuelve
+        `409 idempotency.payload_mismatch`.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "./schemas/simulation-request.schema.json"
+      responses:
+        "200":
+          description: Replay idempotente; no se crea ni inicia otro run.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "201":
+          description: Ejecución creada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /v1/flows/{flowId}/runs:
+    parameters:
+      - $ref: "#/components/parameters/FlowId"
+    post:
+      tags: [Runs]
+      operationId: createDraftRun
+      summary: Simula un snapshot exacto del borrador actual.
+      description: |
+        Captura el documento y ETag actuales antes de simular; cambios
+        posteriores no alteran el run. Esta extensión no exige `If-Match`.
+        La clave idempotente tiene alcance por usuario autenticado, flowId,
+        ETag capturado y key durante 24 horas. El mismo body dentro del alcance
+        devuelve 200; otro body devuelve
+        `409 idempotency.payload_mismatch`. Una nueva revisión del borrador
+        constituye un target distinto y puede reutilizar la misma key.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "./schemas/simulation-request.schema.json"
+      responses:
+        "200":
+          description: Replay idempotente; no se crea ni inicia otro run.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "201":
+          description: Run creado a partir del snapshot del borrador.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /v1/runs/{runId}:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+    get:
+      tags: [Runs]
+      operationId: getRun
+      summary: Obtiene estado y resumen de una ejecución.
+      responses:
+        "200":
+          description: Ejecución.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/runs/{runId}/events:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+    get:
+      tags: [Runs]
+      operationId: listRunEvents
+      summary: Recupera eventos persistidos en orden.
+      parameters:
+        - $ref: "#/components/parameters/AfterSequence"
+      responses:
+        "200":
+          description: Eventos posteriores a la secuencia indicada.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "./schemas/run-event.schema.json"
+
+  /v1/runs/{runId}/pause:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+    post:
+      tags: [Runs]
+      operationId: pauseRun
+      summary: Pausa la ejecución al terminar la transición actual.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "202":
+          $ref: "#/components/responses/RunAccepted"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/runs/{runId}/resume:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+    post:
+      tags: [Runs]
+      operationId: resumeRun
+      summary: Reanuda una ejecución pausada.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "202":
+          $ref: "#/components/responses/RunAccepted"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/runs/{runId}/step:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+    post:
+      tags: [Runs]
+      operationId: stepRun
+      summary: Completa una visita de nodo y vuelve a pausa.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "202":
+          $ref: "#/components/responses/RunAccepted"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/runs/{runId}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+    post:
+      tags: [Runs]
+      operationId: cancelRun
+      summary: Cancela una ejecución activa.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "202":
+          $ref: "#/components/responses/RunAccepted"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/runs/{runId}/speed:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+    patch:
+      tags: [Runs]
+      operationId: setRunPlaybackSpeed
+      summary: Cambia únicamente el ritmo de publicación visual.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [multiplier]
+              properties:
+                multiplier:
+                  type: number
+                  enum: [0.25, 0.5, 1, 2, 4]
+      responses:
+        "200":
+          description: Velocidad aplicada.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [multiplier]
+                properties:
+                  multiplier:
+                    type: number
+
+  /v1/runs/{runId}/ws-ticket:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+    post:
+      tags: [Runs]
+      operationId: createRunWebSocketTicket
+      summary: Crea un ticket WebSocket efímero y de un solo uso.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "201":
+          description: Ticket válido durante 30 segundos.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebSocketTicket"
+
+  /v1/flows/{flowId}/share-links:
+    parameters:
+      - $ref: "#/components/parameters/FlowId"
+    get:
+      tags: [Shares]
+      operationId: listShareLinks
+      summary: Lista enlaces públicos sin exponer sus tokens.
+      responses:
+        "200":
+          description: Enlaces.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ShareLink"
+    post:
+      tags: [Shares]
+      operationId: createShareLink
+      summary: Comparte una versión y, opcionalmente, runs completados.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateShareLinkRequest"
+      responses:
+        "201":
+          description: El token se entrega una sola vez.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedShareLink"
+
+  /v1/share-links/{shareId}:
+    parameters:
+      - $ref: "#/components/parameters/ShareId"
+    delete:
+      tags: [Shares]
+      operationId: revokeShareLink
+      summary: Revoca inmediatamente un enlace.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Enlace revocado.
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /public/v1/shares/{token}:
+    parameters:
+      - $ref: "#/components/parameters/PublicToken"
+    get:
+      tags: [Shares]
+      operationId: getPublicShare
+      summary: Obtiene una vista sanitizada de solo lectura.
+      security: []
+      responses:
+        "200":
+          description: Versión y ejecuciones compartidas sin contexto privado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicShare"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: flowverse_access
+
+  headers:
+    ETag:
+      description: Hash fuerte del borrador persistido.
+      schema:
+        type: string
+
+  parameters:
+    ProjectId:
+      name: projectId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    FlowId:
+      name: flowId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    VersionId:
+      name: versionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    RunId:
+      name: runId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ShareId:
+      name: shareId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    PublicToken:
+      name: token
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 32
+        maxLength: 128
+    CsrfToken:
+      name: X-CSRF-Token
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 32
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      schema:
+        type: string
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Clave obligatoria, recortada antes de validarse y de 8 a 128
+        caracteres. Se conserva 24 horas. Su alcance combina el usuario
+        autenticado, el target exacto de la operación y esta key.
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 128
+    AfterSequence:
+      name: afterSequence
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+
+  schemas:
+    Health:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          enum: [ok]
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        requestId:
+          type: string
+        details:
+          type: array
+          items:
+            $ref: "#/components/schemas/Issue"
+    Issue:
+      type: object
+      additionalProperties: false
+      required: [code, severity, message]
+      properties:
+        code:
+          type: string
+        severity:
+          enum: [info, warning, error]
+        message:
+          type: string
+        path:
+          type: string
+        nodeId:
+          type: string
+        edgeId:
+          type: string
+    User:
+      type: object
+      additionalProperties: false
+      required: [id, email, displayName, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        displayName:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password, displayName]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        password:
+          type: string
+          minLength: 12
+          maxLength: 128
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 80
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 1
+          maxLength: 128
+    Session:
+      type: object
+      additionalProperties: false
+      required: [user, csrfToken, accessExpiresAt]
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        csrfToken:
+          type: string
+        accessExpiresAt:
+          type: string
+          format: date-time
+    ProjectInput:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 2000
+    Project:
+      type: object
+      additionalProperties: false
+      required: [id, name, role, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 2000
+        role:
+          enum: [owner, editor, viewer]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ProjectList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Project"
+    ProjectMember:
+      type: object
+      additionalProperties: false
+      required: [user, role, joinedAt]
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        role:
+          enum: [owner, editor, viewer]
+        joinedAt:
+          type: string
+          format: date-time
+    AddMemberRequest:
+      type: object
+      additionalProperties: false
+      required: [email, role]
+      properties:
+        email:
+          type: string
+          format: email
+        role:
+          enum: [editor, viewer]
+    FlowSummary:
+      type: object
+      additionalProperties: false
+      required:
+        [id, projectId, name, draftEtag, publishedVersionCount, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        draftEtag:
+          type: string
+        publishedVersionCount:
+          type: integer
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    CreateFlowRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 4000
+        definition:
+          $ref: "./schemas/flow-definition.schema.json"
+    FlowMetadataInput:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 4000
+      minProperties: 1
+    FlowVersion:
+      type: object
+      additionalProperties: false
+      required: [id, flowId, number, checksum, publishedAt, publishedBy]
+      properties:
+        id:
+          type: string
+          format: uuid
+        flowId:
+          type: string
+          format: uuid
+        number:
+          type: integer
+          minimum: 1
+        checksum:
+          type: string
+        publishedAt:
+          type: string
+          format: date-time
+        publishedBy:
+          type: string
+          format: uuid
+    ValidationReport:
+      type: object
+      additionalProperties: false
+      required: [valid, issues]
+      properties:
+        valid:
+          type: boolean
+        issues:
+          type: array
+          items:
+            $ref: "#/components/schemas/Issue"
+    FlowAnalysis:
+      type: object
+      additionalProperties: false
+      required:
+        [nodeCount, edgeCount, unreachableNodeIds, cycles, complexity, paths]
+      properties:
+        nodeCount:
+          type: integer
+        edgeCount:
+          type: integer
+        maxDepth:
+          type: [integer, "null"]
+        unreachableNodeIds:
+          type: array
+          items:
+            type: string
+        cycles:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+        complexity:
+          type: integer
+        paths:
+          type: object
+          required: [count, truncated]
+          properties:
+            count:
+              type: integer
+            truncated:
+              type: boolean
+        staticCriticalPath:
+          type: [array, "null"]
+          items:
+            type: string
+    ImportPreview:
+      type: object
+      additionalProperties: false
+      required: [definition, report]
+      properties:
+        definition:
+          $ref: "./schemas/flow-definition.schema.json"
+        report:
+          $ref: "#/components/schemas/ValidationReport"
+    ParseTextRequest:
+      type: object
+      additionalProperties: false
+      required: [text]
+      properties:
+        text:
+          type: string
+          minLength: 10
+          maxLength: 20000
+        locale:
+          type: string
+          default: es
+    Run:
+      type: object
+      additionalProperties: false
+      required:
+        [id, flowVersionId, status, triggerNodeId, logicalTimeMs, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        flowVersionId:
+          description: UUID de la versión publicada; vacío para un snapshot de borrador.
+          oneOf:
+            - type: string
+              format: uuid
+            - type: string
+              const: ""
+        status:
+          enum:
+            [queued, running, paused, completed, failed, cancelled, interrupted]
+        triggerNodeId:
+          type: string
+        logicalTimeMs:
+          type: integer
+          minimum: 0
+        playbackSpeed:
+          type: number
+        createdAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: [string, "null"]
+          format: date-time
+        finishedAt:
+          type: [string, "null"]
+          format: date-time
+        result:
+          type: [object, "null"]
+    WebSocketTicket:
+      type: object
+      additionalProperties: false
+      required: [ticket, expiresAt, url]
+      properties:
+        ticket:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        url:
+          type: string
+          format: uri
+    CreateShareLinkRequest:
+      type: object
+      additionalProperties: false
+      required: [versionId, runIds]
+      properties:
+        versionId:
+          type: string
+          format: uuid
+        runIds:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+        expiresAt:
+          type: [string, "null"]
+          format: date-time
+    ShareLink:
+      type: object
+      additionalProperties: false
+      required: [id, flowId, versionId, runIds, createdAt, revoked]
+      properties:
+        id:
+          type: string
+          format: uuid
+        flowId:
+          type: string
+          format: uuid
+        versionId:
+          type: string
+          format: uuid
+        runIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: [string, "null"]
+          format: date-time
+        revoked:
+          type: boolean
+    CreatedShareLink:
+      type: object
+      additionalProperties: false
+      required:
+        [id, flowId, versionId, runIds, createdAt, revoked, token, publicUrl]
+      properties:
+        id:
+          type: string
+          format: uuid
+        flowId:
+          type: string
+          format: uuid
+        versionId:
+          type: string
+          format: uuid
+        runIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: [string, "null"]
+          format: date-time
+        revoked:
+          type: boolean
+        token:
+          type: string
+        publicUrl:
+          type: string
+          format: uri
+    PublicShare:
+      type: object
+      additionalProperties: false
+      required: [definition, runs]
+      properties:
+        definition:
+          $ref: "./schemas/flow-definition.schema.json"
+        runs:
+          type: array
+          items:
+            type: object
+            description: Resumen sanitizado; nunca contiene input, output ni contexto.
+            required: [id, status, path, timings]
+            properties:
+              id:
+                type: string
+                format: uuid
+              status:
+                type: string
+              path:
+                type: array
+                items:
+                  type: string
+              timings:
+                type: object
+                additionalProperties:
+                  type: integer
+
+  responses:
+    Health:
+      description: Proceso disponible.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Health"
+    Session:
+      description: Sesión activa; las cookies se establecen con Set-Cookie.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Session"
+    RunAccepted:
+      description: La orden de control fue aceptada.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Run"
+    BadRequest:
+      description: |
+        Solicitud inválida. En creación de runs incluye
+        `idempotency.key_required`, `idempotency.key_invalid`, JSON inválido u
+        overrides inexistentes.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Sesión inexistente, vencida o revocada.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: El rol no permite la operación.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Recurso inexistente o no visible para el usuario.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Conflict:
+      description: Estado actual incompatible con la operación.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    IdempotencyConflict:
+      description: |
+        La misma Idempotency-Key ya fue usada dentro de su alcance con otro
+        body. El error estable es `idempotency.payload_mismatch`.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    PreconditionFailed:
+      description: El ETag ya no coincide con el borrador persistido.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ValidationFailed:
+      description: Entrada o grafo inválido.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    PayloadTooLarge:
+      description: El documento supera 1 MB o los límites del grafo.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    TooManyRequests:
+      description: Límite temporal excedido.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    UpstreamFailed:
+      description: El proveedor de interpretación no produjo una propuesta usable.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ServiceUnavailable:
+      description: Dependencia requerida no disponible.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"

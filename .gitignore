@@ -1,0 +1,39 @@
+# Dependencies and package-manager state
+node_modules/
+.pnpm-store/
+
+# JavaScript / TypeScript build output
+.next/
+out/
+dist/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+
+# Go build and test output
+bin/
+/apps/api/api
+*.test
+*.out
+coverage-go/
+
+# Local runtime data
+.data/
+tmp/
+*.log
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# IDE and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Generated performance fixtures
+packages/contracts/fixtures/generated/

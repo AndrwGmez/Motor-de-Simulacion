@@ -1,0 +1,582 @@
+{
+  "schemaVersion": "1.0",
+  "name": "Procesamiento de pedidos",
+  "description": "Valida pago e inventario, prepara el pedido o devuelve el dinero.",
+  "metadata": {
+    "tags": [
+      "pedidos",
+      "demo"
+    ],
+    "createdWith": "FlowVerse 3D"
+  },
+  "variables": [
+    {
+      "path": "/payment/status",
+      "type": "string",
+      "required": true,
+      "default": "pending"
+    },
+    {
+      "path": "/inventory/available",
+      "type": "boolean",
+      "required": true,
+      "default": false
+    },
+    {
+      "path": "/order/status",
+      "type": "string",
+      "required": false,
+      "default": "received"
+    }
+  ],
+  "layout": {
+    "mode": "directional",
+    "camera": {
+      "position": {
+        "x": 0,
+        "y": 120,
+        "z": 700
+      },
+      "target": {
+        "x": 100,
+        "y": 0,
+        "z": 0
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "order-received",
+      "type": "trigger",
+      "label": "Pedido recibido",
+      "description": "Entrada de la simulación.",
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "next",
+          "label": "Continuar"
+        }
+      ],
+      "activationMode": "each",
+      "durationMs": 0,
+      "configuration": {
+        "eventName": "order.received"
+      },
+      "position": {
+        "x": -500,
+        "y": 0,
+        "z": 0
+      },
+      "locked": false,
+      "metadata": {
+        "category": "orders",
+        "color": "#38BDF8"
+      }
+    },
+    {
+      "id": "validate-payment",
+      "type": "process",
+      "label": "Validar pago",
+      "description": "Simula la validación del proveedor de pagos.",
+      "inputs": [
+        {
+          "id": "input",
+          "label": "Entrada"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "next",
+          "label": "Resultado"
+        }
+      ],
+      "activationMode": "each",
+      "durationMs": 350,
+      "configuration": {
+        "operations": []
+      },
+      "position": {
+        "x": -350,
+        "y": 0,
+        "z": 0
+      },
+      "locked": false,
+      "metadata": {
+        "category": "payments",
+        "color": "#8B5CF6"
+      }
+    },
+    {
+      "id": "payment-approved",
+      "type": "decision",
+      "label": "¿Pago aprobado?",
+      "description": "Escoge la primera condición que coincida.",
+      "inputs": [
+        {
+          "id": "input",
+          "label": "Entrada"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "approved",
+          "label": "Sí"
+        },
+        {
+          "id": "rejected",
+          "label": "No"
+        }
+      ],
+      "activationMode": "each",
+      "durationMs": 10,
+      "configuration": {
+        "strategy": "first_match"
+      },
+      "position": {
+        "x": -200,
+        "y": 0,
+        "z": 0
+      },
+      "locked": false,
+      "metadata": {
+        "category": "payments",
+        "color": "#F59E0B"
+      }
+    },
+    {
+      "id": "payment-rejected",
+      "type": "end",
+      "label": "Pago rechazado",
+      "description": "Finaliza la ruta cuando el pago no fue aprobado.",
+      "inputs": [
+        {
+          "id": "input",
+          "label": "Entrada"
+        }
+      ],
+      "outputs": [],
+      "activationMode": "each",
+      "durationMs": 0,
+      "configuration": {
+        "result": "failure",
+        "output": {
+          "reason": "payment_rejected"
+        }
+      },
+      "position": {
+        "x": -50,
+        "y": -200,
+        "z": 0
+      },
+      "locked": false,
+      "metadata": {
+        "category": "results",
+        "color": "#EF4444"
+      }
+    },
+    {
+      "id": "check-inventory",
+      "type": "process",
+      "label": "Revisar inventario",
+      "description": "Consulta la disponibilidad simulada.",
+      "inputs": [
+        {
+          "id": "input",
+          "label": "Entrada"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "next",
+          "label": "Resultado"
+        }
+      ],
+      "activationMode": "each",
+      "durationMs": 500,
+      "configuration": {
+        "operations": []
+      },
+      "position": {
+        "x": -50,
+        "y": 80,
+        "z": 0
+      },
+      "locked": false,
+      "metadata": {
+        "category": "inventory",
+        "color": "#06B6D4"
+      }
+    },
+    {
+      "id": "inventory-available",
+      "type": "decision",
+      "label": "¿Hay inventario?",
+      "description": "Dirige hacia preparación o reembolso.",
+      "inputs": [
+        {
+          "id": "input",
+          "label": "Entrada"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "available",
+          "label": "Sí"
+        },
+        {
+          "id": "unavailable",
+          "label": "No"
+        }
+      ],
+      "activationMode": "each",
+      "durationMs": 10,
+      "configuration": {
+        "strategy": "first_match"
+      },
+      "position": {
+        "x": 100,
+        "y": 80,
+        "z": 0
+      },
+      "locked": false,
+      "metadata": {
+        "category": "inventory",
+        "color": "#F59E0B"
+      }
+    },
+    {
+      "id": "refund-payment",
+      "type": "data",
+      "label": "Devolver el dinero",
+      "description": "Actualiza el estado dentro del contexto simulado.",
+      "inputs": [
+        {
+          "id": "input",
+          "label": "Entrada"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "next",
+          "label": "Continuar"
+        }
+      ],
+      "activationMode": "each",
+      "durationMs": 250,
+      "configuration": {
+        "operations": [
+          {
+            "op": "set",
+            "path": "/order/status",
+            "value": "refunded"
+          }
+        ]
+      },
+      "position": {
+        "x": 250,
+        "y": -80,
+        "z": 0
+      },
+      "locked": false,
+      "metadata": {
+        "category": "payments",
+        "color": "#14B8A6"
+      }
+    },
+    {
+      "id": "refunded",
+      "type": "end",
+      "label": "Pedido reembolsado",
+      "description": "Termina correctamente la ruta de reembolso.",
+      "inputs": [
+        {
+          "id": "input",
+          "label": "Entrada"
+        }
+      ],
+      "outputs": [],
+      "activationMode": "each",
+      "durationMs": 0,
+      "configuration": {
+        "result": "success",
+        "output": {
+          "status": "refunded"
+        }
+      },
+      "position": {
+        "x": 400,
+        "y": -80,
+        "z": 0
+      },
+      "locked": false,
+      "metadata": {
+        "category": "results",
+        "color": "#22C55E"
+      }
+    },
+    {
+      "id": "prepare-order",
+      "type": "process",
+      "label": "Preparar pedido",
+      "description": "Cambia el estado del pedido dentro de la simulación.",
+      "inputs": [
+        {
+          "id": "input",
+          "label": "Entrada"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "next",
+          "label": "Continuar"
+        }
+      ],
+      "activationMode": "each",
+      "durationMs": 1200,
+      "configuration": {
+        "operations": [
+          {
+            "op": "set",
+            "path": "/order/status",
+            "value": "prepared"
+          }
+        ]
+      },
+      "position": {
+        "x": 250,
+        "y": 160,
+        "z": 0
+      },
+      "locked": false,
+      "metadata": {
+        "category": "fulfillment",
+        "color": "#6366F1"
+      }
+    },
+    {
+      "id": "ship-order",
+      "type": "integration",
+      "label": "Enviar pedido",
+      "description": "Representa un proveedor logístico simulado.",
+      "inputs": [
+        {
+          "id": "input",
+          "label": "Entrada"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "next",
+          "label": "Enviado"
+        }
+      ],
+      "activationMode": "each",
+      "durationMs": 0,
+      "configuration": {
+        "service": "Demo Logistics",
+        "latencyMs": 800,
+        "outcome": "success",
+        "response": {
+          "trackingId": "SIM-0001"
+        }
+      },
+      "position": {
+        "x": 400,
+        "y": 160,
+        "z": 0
+      },
+      "locked": false,
+      "metadata": {
+        "category": "shipping",
+        "color": "#A855F7"
+      }
+    },
+    {
+      "id": "confirm-delivery",
+      "type": "process",
+      "label": "Confirmar entrega",
+      "description": "Registra la entrega dentro del contexto simulado.",
+      "inputs": [
+        {
+          "id": "input",
+          "label": "Entrada"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "next",
+          "label": "Continuar"
+        }
+      ],
+      "activationMode": "each",
+      "durationMs": 450,
+      "configuration": {
+        "operations": [
+          {
+            "op": "set",
+            "path": "/order/status",
+            "value": "delivered"
+          }
+        ]
+      },
+      "position": {
+        "x": 550,
+        "y": 160,
+        "z": 0
+      },
+      "locked": false,
+      "metadata": {
+        "category": "shipping",
+        "color": "#6366F1"
+      }
+    },
+    {
+      "id": "delivered",
+      "type": "end",
+      "label": "Pedido entregado",
+      "description": "Final exitoso.",
+      "inputs": [
+        {
+          "id": "input",
+          "label": "Entrada"
+        }
+      ],
+      "outputs": [],
+      "activationMode": "each",
+      "durationMs": 0,
+      "configuration": {
+        "result": "success",
+        "output": {
+          "status": "delivered"
+        }
+      },
+      "position": {
+        "x": 700,
+        "y": 160,
+        "z": 0
+      },
+      "locked": false,
+      "metadata": {
+        "category": "results",
+        "color": "#22C55E"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-order-payment",
+      "source": "order-received",
+      "target": "validate-payment",
+      "sourcePort": "next",
+      "targetPort": "input",
+      "label": "Nuevo pedido",
+      "priority": 0,
+      "isDefault": false
+    },
+    {
+      "id": "edge-payment-decision",
+      "source": "validate-payment",
+      "target": "payment-approved",
+      "sourcePort": "next",
+      "targetPort": "input",
+      "priority": 0,
+      "isDefault": false
+    },
+    {
+      "id": "edge-payment-approved",
+      "source": "payment-approved",
+      "target": "check-inventory",
+      "sourcePort": "approved",
+      "targetPort": "input",
+      "label": "Sí",
+      "condition": {
+        "field": "/payment/status",
+        "operator": "equals",
+        "value": "approved"
+      },
+      "priority": 0,
+      "isDefault": false
+    },
+    {
+      "id": "edge-payment-rejected",
+      "source": "payment-approved",
+      "target": "payment-rejected",
+      "sourcePort": "rejected",
+      "targetPort": "input",
+      "label": "No",
+      "priority": 100,
+      "isDefault": true
+    },
+    {
+      "id": "edge-inventory-decision",
+      "source": "check-inventory",
+      "target": "inventory-available",
+      "sourcePort": "next",
+      "targetPort": "input",
+      "priority": 0,
+      "isDefault": false
+    },
+    {
+      "id": "edge-inventory-available",
+      "source": "inventory-available",
+      "target": "prepare-order",
+      "sourcePort": "available",
+      "targetPort": "input",
+      "label": "Sí",
+      "condition": {
+        "field": "/inventory/available",
+        "operator": "equals",
+        "value": true
+      },
+      "priority": 0,
+      "isDefault": false
+    },
+    {
+      "id": "edge-inventory-missing",
+      "source": "inventory-available",
+      "target": "refund-payment",
+      "sourcePort": "unavailable",
+      "targetPort": "input",
+      "label": "No",
+      "priority": 100,
+      "isDefault": true
+    },
+    {
+      "id": "edge-refund-end",
+      "source": "refund-payment",
+      "target": "refunded",
+      "sourcePort": "next",
+      "targetPort": "input",
+      "priority": 0,
+      "isDefault": false
+    },
+    {
+      "id": "edge-prepare-ship",
+      "source": "prepare-order",
+      "target": "ship-order",
+      "sourcePort": "next",
+      "targetPort": "input",
+      "priority": 0,
+      "isDefault": false
+    },
+    {
+      "id": "edge-ship-confirm",
+      "source": "ship-order",
+      "target": "confirm-delivery",
+      "sourcePort": "next",
+      "targetPort": "input",
+      "priority": 0,
+      "isDefault": false
+    },
+    {
+      "id": "edge-confirm-end",
+      "source": "confirm-delivery",
+      "target": "delivered",
+      "sourcePort": "next",
+      "targetPort": "input",
+      "priority": 0,
+      "isDefault": false
+    }
+  ]
+}
+

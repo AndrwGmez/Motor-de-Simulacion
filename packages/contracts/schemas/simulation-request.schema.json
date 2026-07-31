@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://flowverse.dev/schemas/simulation-request.schema.json",
+  "title": "FlowVerse SimulationRequest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "triggerNodeId",
+    "input"
+  ],
+  "properties": {
+    "triggerNodeId": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+    },
+    "input": {
+      "type": "object",
+      "maxProperties": 250
+    },
+    "overrides": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "type",
+              "edgeId"
+            ],
+            "properties": {
+              "type": {
+                "const": "force_edge"
+              },
+              "edgeId": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "type",
+              "nodeId",
+              "code"
+            ],
+            "properties": {
+              "type": {
+                "const": "fail_node"
+              },
+              "nodeId": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+              },
+              "code": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "message": {
+                "type": "string",
+                "maxLength": 500
+              }
+            }
+          }
+        ]
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxSteps": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000,
+          "default": 10000
+        },
+        "maxVisitsPerNode": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000,
+          "default": 100
+        }
+      }
+    }
+  }
+}
+

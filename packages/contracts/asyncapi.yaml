@@ -1,0 +1,88 @@
+asyncapi: 3.0.0
+info:
+  title: FlowVerse 3D Run Events
+  version: 0.1.0
+  description: |
+    Canal WebSocket de solo salida para eventos persistidos de simulación.
+    Los controles se envían por HTTP. Cada evento se persiste antes de
+    publicarse y su `sequence` permite reanudar sin perder datos.
+
+servers:
+  local:
+    host: localhost:8080
+    protocol: ws
+    description: Desarrollo local
+    pathname: /
+
+channels:
+  runLive:
+    address: /v1/runs/{runId}/live
+    title: Eventos de una ejecución
+    description: |
+      Requiere un ticket efímero de un solo uso en `ticket`. `afterSequence`
+      indica el último evento procesado; el servidor reproduce los posteriores.
+    parameters:
+      runId:
+        $ref: "#/components/parameters/runId"
+    bindings:
+      ws:
+        method: GET
+        query:
+          type: object
+          additionalProperties: false
+          required:
+            - ticket
+          properties:
+            ticket:
+              type: string
+              minLength: 32
+            afterSequence:
+              type: integer
+              minimum: 0
+              default: 0
+        bindingVersion: 0.1.0
+    messages:
+      runEvent:
+        $ref: "#/components/messages/runEvent"
+
+operations:
+  receiveRunEvents:
+    action: receive
+    title: Recibir eventos ordenados
+    summary: El cliente recibe replay y eventos nuevos por la misma conexión.
+    channel:
+      $ref: "#/channels/runLive"
+    messages:
+      - $ref: "#/channels/runLive/messages/runEvent"
+
+components:
+  parameters:
+    runId:
+      description: UUID de una ejecución visible para el usuario.
+      location: $message.payload#/runId
+
+  messages:
+    runEvent:
+      name: RunEvent
+      title: Evento persistido de simulación
+      summary: |
+        Incluye run.started, node.queued, node.started, node.waiting,
+        edge.traversed, node.completed, node.failed, node.skipped,
+        run.paused, run.resumed, run.completed, run.failed,
+        run.limit_exceeded, run.cancelled y run.interrupted.
+      contentType: application/json
+      payload:
+        $ref: "./schemas/run-event.schema.json"
+      examples:
+        - name: Inicio de nodo
+          payload:
+            schemaVersion: "1.0"
+            type: node.started
+            runId: 02fbd9ba-8dd8-4f61-93be-845f067370f9
+            sequence: 12
+            occurredAt: "2026-07-30T20:00:00Z"
+            logicalTimeMs: 2400
+            payload:
+              nodeId: validate-payment
+              tokenId: token-1
+

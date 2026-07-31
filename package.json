@@ -1,0 +1,22 @@
+{
+  "name": "flowverse-3d",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Constructor, simulador y analizador de flujos tridimensionales.",
+  "packageManager": "pnpm@10.15.0",
+  "engines": {
+    "node": ">=24 <25",
+    "pnpm": ">=10 <11"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @flowverse/web dev",
+    "build": "pnpm --filter @flowverse/web build",
+    "lint": "pnpm --filter @flowverse/contracts lint && pnpm --filter @flowverse/web lint",
+    "typecheck": "pnpm --filter @flowverse/contracts typecheck && pnpm --filter @flowverse/web typecheck",
+    "test": "pnpm --filter @flowverse/contracts test && pnpm --filter @flowverse/web test",
+    "test:e2e": "pnpm --filter @flowverse/web test:e2e",
+    "check": "pnpm contracts:check && pnpm lint && pnpm typecheck && pnpm test",
+    "contracts:check": "pnpm --filter @flowverse/contracts check",
+    "contracts:fixture:large": "pnpm --filter @flowverse/contracts fixture:large"
+  }
+}
