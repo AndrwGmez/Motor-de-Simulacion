@@ -28,6 +28,8 @@ interface FlowState {
   past: FlowDefinition[];
   future: FlowDefinition[];
   selectedNodeId?: string;
+  /** Selección completa; `selectedNodeId` es el último marcado. */
+  selectedNodeIds: string[];
   selectedEdgeId?: string;
   validationIssues: ValidationIssue[];
   saveStatus: SaveStatus;
@@ -58,6 +60,7 @@ interface FlowState {
   addEdge: (source: string, target: string) => string | undefined;
   updateEdge: (edgeId: string, changes: Partial<FlowEdge>) => void;
   selectNode: (nodeId?: string) => void;
+  toggleNodeSelection: (nodeId: string) => void;
   selectEdge: (edgeId?: string) => void;
   clearSelection: () => void;
   changeLayout: (mode: LayoutMode) => void;
@@ -126,6 +129,7 @@ const defaultHistory: RunSummary[] = [
 
 export const useFlowStore = create<FlowState>((set, get) => ({
   document: clone(DEMO_DOCUMENT),
+  selectedNodeIds: [],
   past: [],
   future: [],
   validationIssues: validateFlow(DEMO_DOCUMENT.definition),
@@ -147,6 +151,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
       past: [],
       future: [],
       selectedNodeId: undefined,
+      selectedNodeIds: [],
       selectedEdgeId: undefined,
       validationIssues: validateFlow(document.definition),
       saveStatus: "saved",
@@ -171,6 +176,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
     set((state) => ({
       ...changedState(state, clone(definition)),
       selectedNodeId: undefined,
+      selectedNodeIds: [],
       selectedEdgeId: undefined,
       nodeStates: initialNodeStates(definition),
       runStatus: "idle",
@@ -200,6 +206,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
         nodes: [...state.document.definition.nodes, node],
       }),
       selectedNodeId: node.id,
+      selectedNodeIds: [node.id],
       selectedEdgeId: undefined,
     });
     return node.id;
@@ -249,15 +256,19 @@ export const useFlowStore = create<FlowState>((set, get) => ({
 
   deleteSelected: () =>
     set((state) => {
-      if (state.selectedNodeId) {
-        const id = state.selectedNodeId;
+      const seleccionados = state.selectedNodeIds.length > 0
+        ? state.selectedNodeIds
+        : state.selectedNodeId ? [state.selectedNodeId] : [];
+      if (seleccionados.length > 0) {
+        const fuera = new Set(seleccionados);
         return {
           ...changedState(state, {
             ...state.document.definition,
-            nodes: state.document.definition.nodes.filter((node) => node.id !== id),
-            edges: state.document.definition.edges.filter((edge) => edge.source !== id && edge.target !== id),
+            nodes: state.document.definition.nodes.filter((node) => !fuera.has(node.id)),
+            edges: state.document.definition.edges.filter((edge) => !fuera.has(edge.source) && !fuera.has(edge.target)),
           }),
           selectedNodeId: undefined,
+          selectedNodeIds: [],
           selectedEdgeId: undefined,
         };
       }
@@ -301,6 +312,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
         edges: [...state.document.definition.edges, edge],
       }),
       selectedNodeId: undefined,
+      selectedNodeIds: [],
       selectedEdgeId: edge.id,
     });
     return edge.id;
@@ -314,9 +326,28 @@ export const useFlowStore = create<FlowState>((set, get) => ({
       }),
     ),
 
-  selectNode: (selectedNodeId) => set({ selectedNodeId, selectedEdgeId: undefined }),
+  selectNode: (selectedNodeId) => set({
+    selectedNodeId,
+    selectedNodeIds: selectedNodeId ? [selectedNodeId] : [],
+    selectedEdgeId: undefined,
+  }),
+
+  toggleNodeSelection: (nodeId) =>
+    set((state) => {
+      const actuales = state.selectedNodeIds.length > 0
+        ? state.selectedNodeIds
+        : state.selectedNodeId ? [state.selectedNodeId] : [];
+      const siguiente = actuales.includes(nodeId)
+        ? actuales.filter((id) => id !== nodeId)
+        : [...actuales, nodeId];
+      return {
+        selectedNodeIds: siguiente,
+        selectedNodeId: siguiente[siguiente.length - 1],
+        selectedEdgeId: undefined,
+      };
+    }),
   selectEdge: (selectedEdgeId) => set({ selectedEdgeId, selectedNodeId: undefined }),
-  clearSelection: () => set({ selectedNodeId: undefined, selectedEdgeId: undefined }),
+  clearSelection: () => set({ selectedNodeId: undefined, selectedNodeIds: [], selectedEdgeId: undefined }),
 
   changeLayout: (mode) =>
     set((state) => changedState(
@@ -344,6 +375,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
         validationIssues: validateFlow(previous),
         saveStatus: "dirty",
         selectedNodeId: undefined,
+      selectedNodeIds: [],
         selectedEdgeId: undefined,
       };
     }),
@@ -364,6 +396,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
         validationIssues: validateFlow(next),
         saveStatus: "dirty",
         selectedNodeId: undefined,
+      selectedNodeIds: [],
         selectedEdgeId: undefined,
       };
     }),

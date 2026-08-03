@@ -13,12 +13,14 @@
     "build": "pnpm build:packages && pnpm --filter @flowverse/web build",
     "lint": "pnpm --filter @flowverse/contracts lint && pnpm --filter @flowverse/web lint",
     "typecheck": "pnpm --filter @flowverse/contracts typecheck && pnpm --filter @flowverse/web typecheck",
-    "test": "pnpm --filter @flowverse/contracts test && pnpm --filter @flowverse/web test",
+    "test": "pnpm --filter @flowverse/contracts test && pnpm test:packages && pnpm --filter @flowverse/web test",
     "test:e2e": "pnpm --filter @flowverse/web test:e2e",
     "test:e2e:full": "pnpm --filter @flowverse/web test:e2e:full",
     "check": "pnpm contracts:check && pnpm lint && pnpm typecheck && pnpm test",
     "contracts:check": "pnpm --filter @flowverse/contracts check",
     "contracts:fixture:large": "pnpm --filter @flowverse/contracts fixture:large",
-    "build:packages": "pnpm --filter \"./packages/*\" build"
+    "build:packages": "pnpm --filter \"./packages/*\" build",
+    "test:packages": "pnpm --filter \"./packages/*\" test",
+    "publish:packages": "pnpm build:packages && pnpm --filter \"./packages/*\" publish --no-git-checks"
   }
 }

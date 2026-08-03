@@ -18,18 +18,14 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
-    // Las pruebas de los paquetes del workspace se ejecutan con este mismo
-    // corredor: al extraerlos se quedaron sin uno propio, y salir del paso
-    // dejándolas sin ejecutar habría sido perder la red de seguridad justo en
-    // el paso que más la necesita. Cada paquete tendrá el suyo cuando se genere
-    // su artefacto distribuible.
-    include: [
-      "src/**/*.test.{ts,tsx}",
-      "../../packages/*/src/**/*.test.{ts,tsx}",
-    ],
+    include: ["src/**/*.test.{ts,tsx}"],
     coverage: {
       reporter: ["text", "json-summary"],
-      include: ["src/lib/**/*.ts", "src/store/**/*.ts", "../../packages/*/src/**/*.ts"],
+      include: ["src/lib/**/*.ts", "src/store/**/*.ts"],
+      // Umbral de cobertura: CI generaba el informe y no exigía nada, así que
+      // no protegía de nada. Se fija en el nivel actual para que solo pueda
+      // subir.
+      thresholds: { lines: 65, functions: 65, statements: 65 },
     },
   },
 });

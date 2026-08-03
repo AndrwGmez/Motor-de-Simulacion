@@ -6,6 +6,8 @@ import { connectRunEvents, loadFlow, loadPublicShare } from "@/lib/flow-service"
 import { type LayoutMode, type ValidationIssue } from "@flowverse/core";
 import { getProject, type ProjectSummary } from "@/lib/workspace-service";
 import { useAutosave } from "@/hooks/useAutosave";
+import { NODE_PRESENTATION, NODE_TYPES } from "@flowverse/core";
+import { FlowScene2D } from "@flowverse/viewer";
 import { useFlowStore } from "@/store/flow-store";
 import { FlowScene } from "./FlowScene";
 import { Inspector } from "./Inspector";
@@ -54,6 +56,15 @@ export function EditorClient({ flowId, projectId, readOnly = false, shareToken }
   const pastLength = useFlowStore((state) => state.past.length);
   const futureLength = useFlowStore((state) => state.future.length);
   const runStatus = useFlowStore((state) => state.runStatus);
+  // Nodo que se está ejecutando ahora mismo: es al que sigue la cámara.
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number }>();
+  // Las dos vistas leen el mismo flujo y las mismas posiciones: cambiar de una
+  // a otra no altera nada del documento.
+  const [vista, setVista] = useState<"3d" | "2d">("3d");
+  const activeNodeId = useMemo(
+    () => Object.entries(nodeStates).find(([, estado]) => estado === "running")?.[0],
+    [nodeStates],
+  );
   const runSource = useFlowStore((state) => state.runSource);
   const remoteRunId = useFlowStore((state) => state.remoteRunId);
   const eventCursor = useFlowStore((state) => state.eventCursor);
@@ -61,6 +72,7 @@ export function EditorClient({ flowId, projectId, readOnly = false, shareToken }
   const addNode = useFlowStore((state) => state.addNode);
   const addEdge = useFlowStore((state) => state.addEdge);
   const selectNode = useFlowStore((state) => state.selectNode);
+  const toggleNodeSelection = useFlowStore((state) => state.toggleNodeSelection);
   const selectEdge = useFlowStore((state) => state.selectEdge);
   const clearSelection = useFlowStore((state) => state.clearSelection);
   const moveNode = useFlowStore((state) => state.moveNode);
@@ -176,9 +188,11 @@ export function EditorClient({ flowId, projectId, readOnly = false, shareToken }
     return `Guardado · ${saveSource === "api" ? "API" : "local"}`;
   }, [effectiveReadOnly, saveSource, saveStatus]);
 
-  function handleNodeClick(nodeId: string) {
+  function handleNodeClick(nodeId: string, aditivo?: boolean) {
     if (!connectMode || !canEdit) {
-      selectNode(nodeId);
+      // Ctrl o Cmd suma a la selección; sin modificador, la reemplaza.
+      if (aditivo) toggleNodeSelection(nodeId);
+      else selectNode(nodeId);
       return;
     }
     if (!connectionSourceId) {
@@ -303,6 +317,20 @@ export function EditorClient({ flowId, projectId, readOnly = false, shareToken }
               )}
               <button type="button" onClick={() => setFitRequest((value) => value + 1)} title="Encuadrar todo">⌗ <span>Encuadrar</span></button>
             </div>
+            <div className="layout-switcher" aria-label="Vista">
+              <button
+                type="button"
+                className={vista === "3d" ? "active" : ""}
+                onClick={() => setVista("3d")}
+                title="Vista tridimensional"
+              >3D</button>
+              <button
+                type="button"
+                className={vista === "2d" ? "active" : ""}
+                onClick={() => setVista("2d")}
+                title="Vista bidimensional"
+              >2D</button>
+            </div>
             <div className="layout-switcher" aria-label="Modo de distribución">
               {LAYOUTS.map((layout) => (
                 <button
@@ -332,6 +360,18 @@ export function EditorClient({ flowId, projectId, readOnly = false, shareToken }
             </div>
           )}
 
+          {vista === "2d" ? (
+            <FlowScene2D
+              flow={flow}
+              selectedNodeId={selectedNodeId}
+              selectedEdgeId={selectedEdgeId}
+              activeEdgeId={activeEdgeId}
+              nodeStates={nodeStates}
+              onNodeClick={handleNodeClick}
+              onEdgeClick={selectEdge}
+              onBackgroundClick={clearSelection}
+            />
+          ) : (
           <FlowScene
             flow={flow}
             selectedNodeId={selectedNodeId}
@@ -341,11 +381,31 @@ export function EditorClient({ flowId, projectId, readOnly = false, shareToken }
             readOnly={effectiveReadOnly}
             connectionSourceId={connectionSourceId}
             fitRequest={fitRequest}
+            followNodeId={runStatus === "running" ? activeNodeId : undefined}
+            onBackgroundContextMenu={canEdit ? setContextMenu : undefined}
             onNodeClick={handleNodeClick}
             onEdgeClick={selectEdge}
             onNodeMove={moveNode}
             onBackgroundClick={clearSelection}
           />
+          )}
+          {contextMenu && (
+            <div
+              className="context-menu"
+              style={{ left: contextMenu.x, top: contextMenu.y }}
+              role="menu"
+              aria-label="Crear nodo aquí"
+              onMouseLeave={() => setContextMenu(undefined)}
+            >
+              <span className="eyebrow">CREAR AQUÍ</span>
+              {NODE_TYPES.map((tipo) => (
+                <button key={tipo} type="button" role="menuitem" onClick={() => { addNode(tipo); setContextMenu(undefined); }}>
+                  <i aria-hidden="true">{NODE_PRESENTATION[tipo].icon}</i>
+                  {NODE_PRESENTATION[tipo].label}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="canvas-badges">
             <span>{flow.nodes.filter((node) => node.type !== "group").length} nodos</span>
             <span>{flow.edges.length} conexiones</span>

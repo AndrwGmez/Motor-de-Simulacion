@@ -29,3 +29,20 @@ export interface ModeloCodigo {
   modulos: Modulo[];
   referencias: Referencia[];
 }
+
+
+/** Paso del recorrido de negocio, extraído del flujo de control. */
+export type ClasePaso = "entrada" | "proceso" | "decision" | "integracion" | "datos" | "bucle" | "fin_ok" | "fin_error";
+
+export interface Paso {
+  id: string;
+  clase: ClasePaso;
+  etiqueta: string;
+  /** Pasos que siguen a este; el último es el camino por defecto. */
+  siguientes: { destino: string; etiqueta?: string }[];
+}
+
+export interface Recorrido {
+  entrada: string;
+  pasos: Paso[];
+}

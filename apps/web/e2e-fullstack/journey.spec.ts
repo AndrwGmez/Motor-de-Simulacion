@@ -117,8 +117,14 @@ test("ejecuta la simulación en el motor de Go y recibe los eventos por WebSocke
     return runs.find((run) => run.status === "completed") ? "completed" : runs[0]?.status ?? "none";
   }, { timeout: 60_000, intervals: [500] }).toBe("completed");
 
-  expect(frames.some((frame) => frame.includes("run.started"))).toBe(true);
-  expect(frames.some((frame) => frame.includes("run.completed"))).toBe(true);
+  // La API marca la ejecución como completada en cuanto el motor termina, pero
+  // el WebSocket sigue reproduciendo eventos a velocidad de animación. Afirmar
+  // aquí de golpe provocaba un fallo intermitente: había que esperar al
+  // fotograma, no al estado.
+  await expect.poll(() => frames.some((frame) => frame.includes("run.started")),
+    { timeout: 30_000 }).toBe(true);
+  await expect.poll(() => frames.some((frame) => frame.includes("run.completed")),
+    { timeout: 30_000 }).toBe(true);
 });
 
 test("publica una versión inmutable y la comparte en solo lectura", async ({ page, baseURL }) => {

@@ -62,6 +62,13 @@ jobs:
       - name: Unit and integration tests
         working-directory: apps/api
         run: go test -coverprofile=coverage.out ./...
+      - name: Umbral de cobertura
+        working-directory: apps/api
+        run: |
+          total=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | tr -d '%')
+          echo "cobertura total: $total%"
+          awk -v t="$total" 'BEGIN { exit (t+0 >= 50) ? 0 : 1 }' \
+            || { echo "por debajo del 50% exigido"; exit 1; }
       - name: Race detector
         working-directory: apps/api
         run: go test -race ./...
@@ -89,6 +96,8 @@ jobs:
       - run: pnpm --filter "./packages/*" build
       - run: pnpm --filter @flowverse/web lint
       - run: pnpm --filter @flowverse/web typecheck
+      - run: pnpm --filter "./packages/*" build
+      - run: pnpm test:packages
       - run: pnpm --filter @flowverse/web test
       - run: pnpm --filter @flowverse/web build
 

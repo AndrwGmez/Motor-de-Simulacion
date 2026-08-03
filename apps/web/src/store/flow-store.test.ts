@@ -60,3 +60,59 @@ describe("flow store", () => {
     expect(useFlowStore.getState().runHistory).toEqual(runHistory);
   });
 });
+
+// Selección múltiple: la especificación la pide en §8.1 y hoy solo se puede
+// tener un nodo seleccionado, lo que impide mover grupos o borrar de una vez.
+describe("selección múltiple", () => {
+  it("añade nodos a la selección sin perder los anteriores", () => {
+    const store = useFlowStore.getState();
+    store.selectNode("start");
+    store.toggleNodeSelection("end");
+    expect(useFlowStore.getState().selectedNodeIds).toEqual(["start", "end"]);
+  });
+
+  it("quita un nodo ya seleccionado al volver a marcarlo", () => {
+    const store = useFlowStore.getState();
+    store.selectNode("start");
+    store.toggleNodeSelection("end");
+    store.toggleNodeSelection("start");
+    expect(useFlowStore.getState().selectedNodeIds).toEqual(["end"]);
+  });
+
+  it("seleccionar sin modificador reemplaza la selección entera", () => {
+    const store = useFlowStore.getState();
+    store.selectNode("start");
+    store.toggleNodeSelection("end");
+    store.selectNode("start");
+    expect(useFlowStore.getState().selectedNodeIds).toEqual(["start"]);
+  });
+
+  it("mantiene selectedNodeId apuntando al último para el inspector", () => {
+    const store = useFlowStore.getState();
+    store.selectNode("start");
+    store.toggleNodeSelection("end");
+    expect(useFlowStore.getState().selectedNodeId).toBe("end");
+  });
+
+  it("limpiar la selección la vacía por completo", () => {
+    const store = useFlowStore.getState();
+    store.selectNode("start");
+    store.toggleNodeSelection("end");
+    store.clearSelection();
+    expect(useFlowStore.getState().selectedNodeIds).toEqual([]);
+    expect(useFlowStore.getState().selectedNodeId).toBeUndefined();
+  });
+
+  it("borra todos los nodos seleccionados de una vez", () => {
+    const store = useFlowStore.getState();
+    const nodos = useFlowStore.getState().document.definition.nodes;
+    const antes = nodos.length;
+    // Se usan identificadores reales del documento, no inventados: si no
+    // existen, el borrado no elimina nada y la prueba mentiría.
+    const [uno, dos] = nodos.filter((n) => n.type !== "group").slice(0, 2);
+    store.selectNode(uno.id);
+    store.toggleNodeSelection(dos.id);
+    store.deleteSelected();
+    expect(useFlowStore.getState().document.definition.nodes.length).toBe(antes - 2);
+  });
+});

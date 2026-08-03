@@ -20,7 +20,12 @@ async function main(): Promise<void> {
   };
 
   try {
-    const flujo = await analizar(ruta, { modo: (valor("modo") ?? "modules") as Modo });
+    const flujo = await analizar(ruta, {
+      modo: (valor("modo") ?? "modules") as Modo,
+      lenguaje: valor("lenguaje") as "typescript" | "go" | undefined,
+      incluir: valor("incluir"),
+      excluir: valor("excluir"),
+    });
     const json = `${JSON.stringify(flujo, null, 2)}\n`;
     const salida = valor("salida");
     if (salida) {

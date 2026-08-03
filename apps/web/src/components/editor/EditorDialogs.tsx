@@ -1,10 +1,13 @@
 "use client";
+import { parseFlowCsv } from "@flowverse/engine";
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   createShareLink,
   downloadFlow,
+  analyzeFlow,
   parseImportedFlow,
+  type FlowAnalysis,
   parseTextToFlow,
   publishFlow,
   revokeShareLink,
@@ -150,6 +153,19 @@ function FlowPreview({ flow }: { flow: FlowDefinition }) {
   );
 }
 
+/**
+ * Decide el formato por el contenido. Un JSON siempre empieza por `{` o `[`;
+ * cualquier otra cosa se intenta leer como CSV, que es el segundo formato que
+ * admite el contrato.
+ */
+function interpretarImportacion(contenido: string): FlowDefinition {
+  const limpio = contenido.trim();
+  if (limpio.startsWith("{") || limpio.startsWith("[")) {
+    return parseImportedFlow(JSON.parse(limpio) as unknown);
+  }
+  return parseImportedFlow(parseFlowCsv(limpio));
+}
+
 export function ImportDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const replaceDefinition = useFlowStore((state) => state.replaceDefinition);
   const [text, setText] = useState("");
@@ -159,7 +175,7 @@ export function ImportDialog({ open, onClose }: { open: boolean; onClose: () => 
   const parse = () => {
     try {
       if (new Blob([text]).size > 1_000_000) throw new Error("El archivo supera el límite de 1 MB.");
-      setPreview(parseImportedFlow(JSON.parse(text) as unknown));
+      setPreview(interpretarImportacion(text));
       setError("");
     } catch (cause) {
       setPreview(undefined);
@@ -186,7 +202,7 @@ export function ImportDialog({ open, onClose }: { open: boolean; onClose: () => 
                 const content = await file.text();
                 setText(content);
                 try {
-                  setPreview(parseImportedFlow(JSON.parse(content) as unknown));
+                  setPreview(interpretarImportacion(content));
                   setError("");
                 } catch (cause) {
                   setError(cause instanceof Error ? cause.message : "Archivo inválido.");
@@ -194,8 +210,8 @@ export function ImportDialog({ open, onClose }: { open: boolean; onClose: () => 
               }}
             />
             <span aria-hidden="true">⇧</span>
-            <strong>Arrastra o elige un JSON</strong>
-            <small>Contrato FlowDefinition 1.0 · máximo 1 MB</small>
+            <strong>Arrastra o elige un JSON o CSV</strong>
+            <small>Contrato FlowDefinition 1.0 o CSV con columnas id, tipo, etiqueta y conecta_con</small>
           </div>
           <div className="palette-divider"><span>O PEGA EL DOCUMENTO</span></div>
           <textarea
@@ -331,8 +347,27 @@ export function ValidationDialog({
   onSelectIssue: (issue: ValidationIssue) => void;
 }) {
   const flow = useFlowStore((state) => state.document.definition);
+  const flowId = useFlowStore((state) => state.document.flowId);
   const issues = useFlowStore((state) => state.validationIssues);
   const metrics = flowMetrics(flow, issues);
+  const [analysis, setAnalysis] = useState<FlowAnalysis>();
+  const [analysisError, setAnalysisError] = useState("");
+
+  // El motor en Go ya calcula ciclos, camino crítico y cuellos de botella; se
+  // piden al abrir el panel en vez de recalcular en el navegador un subconjunto
+  // más pobre. En modo demo devuelve undefined y se muestran las locales.
+  useEffect(() => {
+    if (!open) return;
+    let vigente = true;
+    setAnalysisError("");
+    analyzeFlow(flowId)
+      .then((resultado) => { if (vigente) setAnalysis(resultado); })
+      .catch((causa: unknown) => {
+        if (vigente) setAnalysisError(causa instanceof Error ? causa.message : "No se pudo analizar el flujo.");
+      });
+    return () => { vigente = false; };
+  }, [flowId, open]);
+
   return (
     <Modal open={open} onClose={onClose} eyebrow="VALIDACIÓN Y ANÁLISIS" title="Salud del flujo" wide>
       <div className="metrics-grid">
@@ -341,6 +376,31 @@ export function ValidationDialog({
         <article><span>Cobertura</span><strong>{metrics.coveragePercent}%</strong><small>desde los inicios</small></article>
         <article className={metrics.errors ? "danger" : "healthy"}><span>Estado</span><strong>{metrics.errors ? `${metrics.errors} errores` : "Ejecutable"}</strong><small>{metrics.warnings} advertencias</small></article>
       </div>
+      {analysis && (
+        <div className="metrics-grid">
+          <article>
+            <span>Camino crítico</span>
+            <strong>{analysis.criticalPathNodeIds.length || "—"}</strong>
+            <small>{analysis.criticalPathNodeIds.length ? "nodos en la ruta más larga" : "no aplica con ciclos"}</small>
+          </article>
+          <article className={analysis.cycles.length ? "danger" : "healthy"}>
+            <span>Ciclos</span>
+            <strong>{analysis.cycles.length}</strong>
+            <small>{analysis.cycles.length ? `${Math.max(...analysis.cycles.map((c) => c.length))} nodos el mayor` : "ninguno"}</small>
+          </article>
+          <article className={analysis.unreachableNodeIds.length ? "danger" : "healthy"}>
+            <span>Inalcanzables</span>
+            <strong>{analysis.unreachableNodeIds.length}</strong>
+            <small>desde cualquier inicio</small>
+          </article>
+          <article>
+            <span>Caminos</span>
+            <strong>{analysis.pathCount}{analysis.pathsTruncated ? "+" : ""}</strong>
+            <small>profundidad {analysis.maxDepth}</small>
+          </article>
+        </div>
+      )}
+      {analysisError && <p className="dialog-error" role="alert">⚠ {analysisError}</p>}
       <div className="issue-list">
         {issues.length === 0 ? (
           <div className="validation-success">

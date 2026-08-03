@@ -6,7 +6,7 @@ import type * as THREE from "three";
 import type { FlowDefinition, FlowEdge, FlowNode, NodeRunStatus } from "@flowverse/core";
 import { NODE_PRESENTATION } from "@flowverse/core";
 import { SceneResources } from "./scene-resources";
-import { DEFAULT_PAN, PAN_KEYS, applyCameraFeel, applyStudioLighting, easePan, ignoresKeyboard, panCamera, panDirection, type CameraControls } from "./scene-camera";
+import { DEFAULT_PAN, PAN_KEYS, applyCameraFeel, applyStudioLighting, easePan, ignoresKeyboard, panCamera, panDirection, posicionMenuContextual, seguirNodo, type CameraControls } from "./scene-camera";
 import { BatchedLinks, InstancedBodies, applyLevelOfDetail, DEFAULT_LOD, type BatchedLink, type InstancedTarget, type LodLink } from "./scene-performance";
 
 interface GraphNode extends FlowNode {
@@ -32,10 +32,15 @@ interface FlowScene3DProps {
   readOnly?: boolean;
   connectionSourceId?: string;
   fitRequest?: number;
-  onNodeClick: (nodeId: string) => void;
+  /** Nodo que la cámara debe seguir durante la ejecución (§8.3). */
+  followNodeId?: string;
+  /** `aditivo` llega cuando se pulsa Ctrl o Cmd: añade a la selección. */
+  onNodeClick: (nodeId: string, aditivo?: boolean) => void;
   onEdgeClick: (edgeId: string) => void;
   onNodeMove: (nodeId: string, position: { x: number; y: number; z: number }) => void;
   onBackgroundClick: () => void;
+  /** Menú contextual sobre el fondo (§8.1); recibe la posición ya acotada. */
+  onBackgroundContextMenu?: (posicion: { x: number; y: number }) => void;
 }
 
 export function FlowScene3D({
@@ -47,10 +52,12 @@ export function FlowScene3D({
   readOnly,
   connectionSourceId,
   fitRequest,
+  followNodeId,
   onNodeClick,
   onEdgeClick,
   onNodeMove,
   onBackgroundClick,
+  onBackgroundContextMenu,
 }: FlowScene3DProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<
@@ -145,6 +152,23 @@ export function FlowScene3D({
   }, []);
 
   useEffect(() => {
+    const contenedor = containerRef.current;
+    if (!contenedor || !onBackgroundContextMenu) return;
+    const abrir = (event: MouseEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const caja = contenedor.getBoundingClientRect();
+      onBackgroundContextMenu(posicionMenuContextual(
+        { x: event.clientX - caja.left, y: event.clientY - caja.top },
+        { width: caja.width, height: caja.height },
+        { width: 232, height: 320 },
+      ));
+    };
+    contenedor.addEventListener("contextmenu", abrir, { capture: true });
+    return () => contenedor.removeEventListener("contextmenu", abrir, { capture: true });
+  }, [onBackgroundContextMenu]);
+
+  useEffect(() => {
     if (!fitRequest) return;
     const timer = window.setTimeout(() => graphRef.current?.zoomToFit(650, 80), 30);
     return () => window.clearTimeout(timer);
@@ -212,6 +236,14 @@ export function FlowScene3D({
         linkBatch.current.updatePositions();
       }
 
+      // El seguimiento cede ante el teclado: si el usuario mueve la cámara,
+      // manda él.
+      if (followNodeId && pressedKeys.current.size === 0) {
+        const controls = graph.controls() as unknown as { target?: THREE.Vector3 } | undefined;
+        const activo = data.nodes.find((nodo) => nodo.id === followNodeId);
+        if (controls?.target && activo) seguirNodo(camera, controls.target, activo, 0.06);
+      }
+
       const objetivo = panDirection(pressedKeys.current);
       panVelocity.current = easePan(panVelocity.current, objetivo, DEFAULT_PAN.smoothing);
       if (Math.hypot(panVelocity.current.x, panVelocity.current.y) > 0.0005) {
@@ -231,12 +263,17 @@ export function FlowScene3D({
             const objeto = (node as { __threeObj?: THREE.Object3D }).__threeObj;
             if (objeto) resources.current.attachLabel(objeto);
           },
+          60,
+          (node, escala) => {
+            const objeto = (node as { __threeObj?: THREE.Object3D }).__threeObj;
+            if (objeto) resources.current.upgradeLabel(objeto, escala);
+          },
         );
       }
     };
     handle = window.requestAnimationFrame(step);
     return () => window.cancelAnimationFrame(handle);
-  }, [activeEdgeId, connectionSourceId, data, nodeStates, selectedEdgeId, selectedNodeId]);
+  }, [activeEdgeId, connectionSourceId, data, followNodeId, nodeStates, selectedEdgeId, selectedNodeId]);
 
   // Los lotes se rehacen cuando cambia el grafo o el aspecto de algún nodo.
   useEffect(() => {
@@ -261,6 +298,7 @@ export function FlowScene3D({
     <div
       ref={containerRef}
       className={`flow-scene ${connectionSourceId ? "is-connecting" : ""}`}
+
       aria-label="Universo tridimensional del flujo"
       data-testid="flow-scene"
     >
@@ -309,8 +347,9 @@ export function FlowScene3D({
         cooldownTicks={flow.layout.mode === "force" ? 240 : 0}
         onNodeClick={(value, event) => {
           const node = value as GraphNode;
-          if ((event as MouseEvent).detail >= 2) focusNode(node);
-          else onNodeClick(node.id);
+          const raton = event as MouseEvent;
+          if (raton.detail >= 2) focusNode(node);
+          else onNodeClick(node.id, raton.ctrlKey || raton.metaKey);
         }}
         onNodeRightClick={(value) => onNodeClick((value as GraphNode).id)}
         onNodeDragEnd={(value) => {

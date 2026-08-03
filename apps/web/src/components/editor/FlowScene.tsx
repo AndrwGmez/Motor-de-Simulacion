@@ -23,10 +23,12 @@ interface FlowSceneProps {
   readOnly?: boolean;
   connectionSourceId?: string;
   fitRequest?: number;
+  followNodeId?: string;
   onNodeClick: (nodeId: string) => void;
   onEdgeClick: (edgeId: string) => void;
   onNodeMove: (nodeId: string, position: { x: number; y: number; z: number }) => void;
   onBackgroundClick: () => void;
+  onBackgroundContextMenu?: (posicion: { x: number; y: number }) => void;
 }
 
 export function FlowScene(props: FlowSceneProps) {

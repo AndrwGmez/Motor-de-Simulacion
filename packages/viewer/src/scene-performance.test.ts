@@ -329,3 +329,26 @@ describe("los lotes sobreviven a que la librería rehaga la escena", () => {
     expect(lote.parent).toBe(scene);
   });
 });
+
+describe("el bucle por cuadro no toca lo que no debe", () => {
+  it("no recalcula la esfera envolvente en cada cuadro", () => {
+    const scene = new THREE.Scene();
+    const resources = new SceneResources(fakeCanvas);
+    const bodies = new InstancedBodies(resources);
+    const item = node("a", "process");
+    const grupo = resources.nodeObject(item, "idle", false);
+    bodies.sync(scene, [{ ...item, x: 0, y: 0, z: 0, __threeObj: grupo }]);
+
+    const lote = scene.children.find((c) => c instanceof THREE.InstancedMesh) as THREE.InstancedMesh;
+    let recalculos = 0;
+    lote.computeBoundingSphere = () => { recalculos += 1; };
+
+    for (let cuadro = 0; cuadro < 10; cuadro += 1) bodies.updatePositions();
+
+    // Con `frustumCulled = false` la esfera no la usa nadie, y recalcularla
+    // sobre miles de instancias en cada cuadro hacía que el renderizador dejara
+    // de dibujar los cuerpos en cuanto movías la cámara.
+    expect(recalculos).toBe(0);
+    expect(lote.frustumCulled).toBe(false);
+  });
+});

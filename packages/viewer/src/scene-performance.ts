@@ -20,11 +20,16 @@ import { SceneResources, STATUS_COLORS } from "./scene-resources";
 export interface LodSettings {
   labelDistance: number;
   arrowDistance: number;
+  sharpLabelDistance: number;
+  sharpLabelScale: number;
 }
 
 export const DEFAULT_LOD: LodSettings = {
   labelDistance: 1100,
   arrowDistance: 1600,
+  /** Por debajo de esta distancia el texto de mapa de bits se ve escalonado. */
+  sharpLabelDistance: 320,
+  sharpLabelScale: 3,
 };
 
 interface Point {
@@ -70,8 +75,11 @@ export function applyLevelOfDetail(
   selectedId?: string,
   requestLabel?: (node: LodTarget) => void,
   budget = 60,
+  upgradeLabel?: (node: LodTarget, escala: number) => void,
 ): LodReport {
   const labelLimit = settings.labelDistance * settings.labelDistance;
+  const sharpLimit = settings.sharpLabelDistance * settings.sharpLabelDistance;
+  let upgraded = 0;
   const arrowLimit = settings.arrowDistance * settings.arrowDistance;
   const report: LodReport = { labelsVisible: 0, labelsHidden: 0, arrowsVisible: 0, arrowsHidden: 0 };
 
@@ -94,6 +102,17 @@ export function applyLevelOfDetail(
       if (!label) continue;
     }
     if (label.visible !== visible) label.visible = visible;
+
+    // Solo las pocas etiquetas realmente cercanas suben de resolución, con el
+    // mismo tope por pasada que su creación para no congelar la escena.
+    if (visible && upgradeLabel && upgraded < budget) {
+      const distancia = distanceSquared(camera, node.x ?? 0, node.y ?? 0, node.z ?? 0);
+      const escala = distancia <= sharpLimit ? settings.sharpLabelScale : 1;
+      if (node.__threeObj?.userData?.labelScale !== escala) {
+        upgradeLabel(node, escala);
+        upgraded += 1;
+      }
+    }
     if (visible) report.labelsVisible += 1;
     else report.labelsHidden += 1;
   }
@@ -237,7 +256,6 @@ export class InstancedBodies {
         batch.mesh.setMatrixAt(index, SCRATCH_MATRIX);
       }
       batch.mesh.instanceMatrix.needsUpdate = true;
-      batch.mesh.computeBoundingSphere();
     }
   }
 
@@ -402,7 +420,6 @@ export class BatchedLinks {
       mesh.setMatrixAt(index, LINK_MATRIX);
     }
     mesh.instanceMatrix.needsUpdate = true;
-    mesh.computeBoundingSphere();
   }
 
   private clear(scene: THREE.Object3D): void {

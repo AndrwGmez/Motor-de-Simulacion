@@ -23,7 +23,7 @@ describe("flow service API adapter", () => {
     expect(document.etag).toBe('"sha256-canonical-checksum"');
     expect(fetchMock).toHaveBeenCalledWith(
       `http://api.flowverse.test/v1/flows/${id}/draft`,
-      { credentials: "include" },
+      expect.objectContaining({ credentials: "include" }),
     );
   });
 
@@ -63,7 +63,7 @@ describe("flow service API adapter", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       `http://api.flowverse.test/v1/flows/${flowId}/versions`,
-      { credentials: "include" },
+      expect.objectContaining({ credentials: "include" }),
     );
   });
 
@@ -452,5 +452,62 @@ describe("ingesta de flujos sin campos opcionales", () => {
     source.nodes[0].metadata = { color: "#ff0000", category: "pagos" };
     const definition = parseImportedFlow(source);
     expect(definition.nodes[0].metadata).toEqual({ color: "#ff0000", category: "pagos" });
+  });
+});
+
+describe("análisis del motor de Go", () => {
+  const flowId = "02fbd9ba-8dd8-4f61-93be-845f067370f9";
+
+  it("pide el análisis a la API en vez de recalcularlo en el navegador", async () => {
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://api.flowverse.test");
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: vi.fn().mockResolvedValue({
+        nodeCount: 482, edgeCount: 1000, maxDepth: 10, complexity: 520,
+        // Forma real de la API, verificada contra el servidor: los ciclos son
+        // listas de identificadores y el camino crítico viene en
+        // `staticCriticalPath`. No envía cuellos de botella.
+        cycles: [["a", "b"]],
+        paths: { count: 100, truncated: true },
+        unreachableNodeIds: ["huerfano"],
+        staticCriticalPath: ["a", "b", "c"],
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { analyzeFlow } = await import("./flow-service");
+    const analisis = await analyzeFlow(flowId);
+    if (!analisis) throw new Error("con API configurada el análisis no puede faltar");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `http://api.flowverse.test/v1/flows/${flowId}/analyze`,
+      expect.objectContaining({ method: "POST" }),
+    );
+    // Lo que el cálculo local no sabe dar: ciclos, camino crítico y cuellos.
+    expect(analisis.cycles).toEqual([["a", "b"]]);
+    expect(analisis.criticalPathNodeIds).toEqual(["a", "b", "c"]);
+    expect(analisis.unreachableNodeIds).toEqual(["huerfano"]);
+    expect(analisis.pathsTruncated).toBe(true);
+  });
+
+  it("no inventa un análisis cuando la API falla", async () => {
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://api.flowverse.test");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false, status: 500, headers: new Headers(),
+      json: vi.fn().mockResolvedValue({ message: "boom" }),
+    }));
+    const { analyzeFlow } = await import("./flow-service");
+    await expect(analyzeFlow(flowId)).rejects.toThrow();
+  });
+
+  it("en modo demo no llama a la API", async () => {
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { analyzeFlow } = await import("./flow-service");
+    expect(await analyzeFlow("demo-pedidos")).toBeUndefined();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

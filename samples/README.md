@@ -57,3 +57,26 @@ sustituye el borrador solo cuando lo confirmas.
 Ambos archivos validan con un único aviso `cycle.with_exit`, que es informativo:
 avisa de que el ciclo de reintento existe y que el motor lo acotará en
 tiempo de ejecución.
+
+## Derivar un flujo desde código existente
+
+`@flowverse/codegraph` lee un repositorio y produce un `FlowDefinition` válido,
+en tres granularidades:
+
+```bash
+# Arquitectura: un nodo por archivo, una conexión por importación
+flowverse-codegraph ./proyecto --modo modules > arquitectura.flow.json
+
+# Funciones y llamadas, con filtros de alcance
+flowverse-codegraph ./proyecto --modo functions --incluir servicios > funciones.flow.json
+
+# Recorrido de negocio: sigue el flujo de control de un punto de entrada
+flowverse-codegraph ./proyecto --modo journey > recorrido.flow.json
+```
+
+El modo `journey` es el único simulable de verdad: traduce condicionales a
+decisiones con su camino por defecto, clientes HTTP a integraciones, accesos a
+persistencia a nodos de datos y `return`/`throw` a finales correcto y con error.
+
+Los tres emiten el mismo contrato, así que el resultado entra por **⇧ Importar
+JSON** y se valida, analiza, simula y comparte como cualquier otro flujo.

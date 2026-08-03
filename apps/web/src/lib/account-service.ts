@@ -1,3 +1,6 @@
+import { apiFetch, hasConfiguredApi } from "./api-client";
+
+export { hasConfiguredApi } from "./api-client";
 export interface AccountUser {
   id: string;
   email: string;
@@ -11,9 +14,7 @@ export interface AccountSession {
   accessExpiresAt: string;
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "");
 
-export const hasConfiguredApi = Boolean(API_URL);
 
 function csrfToken(): string | undefined {
   if (typeof document === "undefined") return undefined;
@@ -44,7 +45,7 @@ export async function authenticate(
   mode: "login" | "register",
   values: { email: string; password: string; displayName?: string },
 ): Promise<AccountSession> {
-  if (!API_URL) {
+  if (!hasConfiguredApi) {
     return {
       user: {
         id: "demo-user",
@@ -59,9 +60,8 @@ export async function authenticate(
   const body = mode === "register"
     ? { email: values.email, password: values.password, displayName: values.displayName }
     : { email: values.email, password: values.password };
-  const response = await fetch(`${API_URL}/v1/auth/${mode}`, {
+  const response = await apiFetch(`/v1/auth/${mode}`, {
     method: "POST",
-    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
@@ -74,19 +74,18 @@ export async function authenticate(
 }
 
 export async function getCurrentUser(): Promise<AccountUser | undefined> {
-  if (!API_URL) return undefined;
-  const response = await fetch(`${API_URL}/v1/auth/me`, { credentials: "include" });
+  if (!hasConfiguredApi) return undefined;
+  const response = await apiFetch(`/v1/auth/me`, {});
   if (response.status === 401) return undefined;
   if (!response.ok) throw new Error(await errorMessage(response));
   return unwrap<AccountUser>(await response.json() as unknown);
 }
 
 export async function logout(): Promise<void> {
-  if (!API_URL) return;
+  if (!hasConfiguredApi) return;
   const csrf = csrfToken();
-  const response = await fetch(`${API_URL}/v1/auth/logout`, {
+  const response = await apiFetch(`/v1/auth/logout`, {
     method: "POST",
-    credentials: "include",
     headers: csrf ? { "X-CSRF-Token": decodeURIComponent(csrf) } : {},
   });
   if (!response.ok && response.status !== 401) throw new Error(await errorMessage(response));

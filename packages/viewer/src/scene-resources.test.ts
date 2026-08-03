@@ -171,3 +171,37 @@ describe("materiales por tipo de nodo", () => {
     expect(corriendo.emissiveIntensity).toBeGreaterThan(0);
   });
 });
+
+// Las etiquetas son texturas de mapa de bits: de cerca cada téxel cubre varios
+// píxeles de pantalla y el texto se ve escalonado. La solución es un segundo
+// escalón de resolución para las pocas etiquetas próximas a la cámara.
+describe("etiquetas nítidas de cerca", () => {
+  it("ofrece una versión de más resolución sin cambiar el tamaño en pantalla", () => {
+    const normal = resources.labelMetricsFor("Validar pago", false);
+    const nitida = resources.labelMetricsFor("Validar pago", false, 3);
+    expect(nitida.canvasWidth).toBe(normal.canvasWidth * 3);
+    expect(nitida.canvasHeight).toBe(normal.canvasHeight * 3);
+    // El sprite mide lo mismo: solo cambia la densidad de téxeles.
+    expect(nitida.spriteWidth).toBeCloseTo(normal.spriteWidth, 5);
+    expect(nitida.spriteHeight).toBeCloseTo(normal.spriteHeight, 5);
+  });
+
+  it("guarda las dos resoluciones por separado, no una encima de otra", () => {
+    const normal = resources.labelMaterialFor("Validar pago", false);
+    const nitida = resources.labelMaterialFor("Validar pago", false, 3);
+    expect(nitida).not.toBe(normal);
+    expect(resources.labelMaterialFor("Validar pago", false, 3)).toBe(nitida);
+  });
+
+  it("sustituye la etiqueta de un nodo por su versión nítida", () => {
+    const item = node("n1", "process", "Validar pago");
+    const grupo = resources.nodeObject(item, "idle", false);
+    const base = resources.attachLabel(grupo);
+    const mejorada = resources.upgradeLabel(grupo, 3);
+    expect(mejorada).toBeDefined();
+    expect(mejorada).not.toBe(base);
+    expect(grupo.userData.label).toBe(mejorada);
+    // Volver a pedirla no vuelve a dibujar nada.
+    expect(resources.upgradeLabel(grupo, 3)).toBe(mejorada);
+  });
+});

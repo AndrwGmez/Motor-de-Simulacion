@@ -88,8 +88,8 @@ export interface LabelMetrics {
 
 type CanvasFactory = () => HTMLCanvasElement;
 
-function fontFor(selected: boolean): string {
-  return `${selected ? 650 : 520} 34px Inter, Arial, sans-serif`;
+function fontFor(selected: boolean, escala = 1): string {
+  return `${selected ? 650 : 520} ${34 * escala}px Inter, Arial, sans-serif`;
 }
 
 export class SceneResources {
@@ -167,8 +167,8 @@ export class SceneResources {
     return material;
   }
 
-  labelMetricsFor(text: string, selected: boolean): LabelMetrics {
-    const metricsKey = `${selected ? "sel" : "norm"}:${text}`;
+  labelMetricsFor(text: string, selected: boolean, escala = 1): LabelMetrics {
+    const metricsKey = `${selected ? "sel" : "norm"}:${escala}:${text}`;
     const remembered = this.metrics.get(metricsKey);
     if (remembered) return remembered;
 
@@ -187,43 +187,45 @@ export class SceneResources {
       measured = context.measureText(trimmed).width;
     }
     const boxWidth = Math.min(LABEL_MAX_BOX, measured + LABEL_PADDING);
-    const canvasWidth = Math.ceil(boxWidth) + STROKE_MARGIN;
+    const anchoBase = Math.ceil(boxWidth) + STROKE_MARGIN;
+    // La escala multiplica los píxeles del lienzo pero no el tamaño del sprite:
+    // el texto ocupa lo mismo en pantalla y se dibuja con más téxeles.
     const metrics: LabelMetrics = {
       text: trimmed,
-      boxWidth,
-      canvasWidth,
-      canvasHeight: LABEL_HEIGHT,
-      spriteWidth: (SPRITE_REFERENCE_WIDTH * canvasWidth) / LABEL_REFERENCE_WIDTH,
+      boxWidth: boxWidth * escala,
+      canvasWidth: anchoBase * escala,
+      canvasHeight: LABEL_HEIGHT * escala,
+      spriteWidth: (SPRITE_REFERENCE_WIDTH * anchoBase) / LABEL_REFERENCE_WIDTH,
       spriteHeight: SPRITE_HEIGHT,
     };
     this.metrics.set(metricsKey, metrics);
     return metrics;
   }
 
-  labelMaterialFor(text: string, selected: boolean): THREE.SpriteMaterial {
-    const key = `${selected ? "sel" : "norm"}:${text}`;
+  labelMaterialFor(text: string, selected: boolean, escala = 1): THREE.SpriteMaterial {
+    const key = `${selected ? "sel" : "norm"}:${escala}:${text}`;
     const cached = this.labels.get(key);
     if (cached) return cached;
 
-    const metrics = this.labelMetricsFor(text, selected);
+    const metrics = this.labelMetricsFor(text, selected, escala);
     const canvas = this.createCanvas();
     canvas.width = metrics.canvasWidth;
     canvas.height = metrics.canvasHeight;
     const context = canvas.getContext("2d");
     if (context) {
       context.clearRect(0, 0, canvas.width, canvas.height);
-      context.font = fontFor(selected);
+      context.font = fontFor(selected, escala);
       context.textAlign = "center";
       context.textBaseline = "middle";
       context.fillStyle = selected ? "rgba(25, 32, 63, .96)" : "rgba(8, 12, 24, .86)";
       context.strokeStyle = selected ? "rgba(130, 153, 255, .9)" : "rgba(118, 131, 169, .35)";
-      context.lineWidth = selected ? 4 : 2;
+      context.lineWidth = (selected ? 4 : 2) * escala;
       context.beginPath();
-      context.roundRect((canvas.width - metrics.boxWidth) / 2, 24, metrics.boxWidth, 74, 23);
+      context.roundRect((canvas.width - metrics.boxWidth) / 2, 24 * escala, metrics.boxWidth, 74 * escala, 23 * escala);
       context.fill();
       context.stroke();
       context.fillStyle = selected ? "#ffffff" : "#d9deef";
-      context.fillText(metrics.text, canvas.width / 2, 62);
+      context.fillText(metrics.text, canvas.width / 2, 62 * escala);
     }
     // Se conservan los mipmaps del diseño original: sin ellos las etiquetas
     // lejanas aparecen dentadas, y eso sería cambiar lo que se ve.
@@ -234,9 +236,9 @@ export class SceneResources {
     return material;
   }
 
-  private labelSprite(text: string, selected: boolean): THREE.Sprite {
-    const metrics = this.labelMetricsFor(text, selected);
-    const sprite = new THREE.Sprite(this.labelMaterialFor(text, selected));
+  private labelSprite(text: string, selected: boolean, escala = 1): THREE.Sprite {
+    const metrics = this.labelMetricsFor(text, selected, escala);
+    const sprite = new THREE.Sprite(this.labelMaterialFor(text, selected, escala));
     sprite.scale.set(metrics.spriteWidth, metrics.spriteHeight, 1);
     sprite.position.set(0, 28, 0);
     sprite.renderOrder = 5;
@@ -313,6 +315,26 @@ export class SceneResources {
     const sprite = this.labelSprite(text, selected ?? Boolean(group.userData.labelSelected));
     group.add(sprite);
     group.userData.label = sprite;
+    group.userData.labelScale = 1;
+    return sprite;
+  }
+
+  /**
+   * Cambia la etiqueta de un nodo por una de más resolución. Se llama cuando la
+   * cámara está lo bastante cerca como para que se notaría el escalonado.
+   */
+  upgradeLabel(group: THREE.Object3D, escala: number): THREE.Sprite | undefined {
+    const text = group.userData.labelText as string | undefined;
+    if (text === undefined) return undefined;
+    if (group.userData.labelScale === escala) return group.userData.label as THREE.Sprite | undefined;
+
+    const anterior = group.userData.label as THREE.Sprite | undefined;
+    const selected = Boolean(group.userData.labelSelected);
+    const sprite = this.labelSprite(text, selected, escala);
+    if (anterior) group.remove(anterior);
+    group.add(sprite);
+    group.userData.label = sprite;
+    group.userData.labelScale = escala;
     return sprite;
   }
 

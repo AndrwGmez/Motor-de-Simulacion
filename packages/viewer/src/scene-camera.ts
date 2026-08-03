@@ -141,3 +141,72 @@ export function applyStudioLighting({ scene, renderer }: StudioTargets): THREE.T
   generator.dispose();
   return environment;
 }
+
+/**
+ * Búsqueda de nodos por nombre o identificador (§8.1).
+ *
+ * Se normalizan acentos en ambos lados: quien busca "expedicion" espera
+ * encontrar "Expedición", y obligarle a escribir la tilde es una forma tonta de
+ * que la función no sirva.
+ */
+export interface NodoBuscable {
+  id: string;
+  label: string;
+}
+
+function normalizar(valor: string): string {
+  return valor
+    .toLocaleLowerCase("es")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+}
+
+export function buscarNodos<T extends NodoBuscable>(nodos: readonly T[], consulta: string, limite = 50): T[] {
+  const termino = normalizar(consulta.trim());
+  if (termino.length === 0) return [];
+  const encontrados: T[] = [];
+  for (const nodo of nodos) {
+    if (normalizar(nodo.label).includes(termino) || normalizar(nodo.id).includes(termino)) {
+      encontrados.push(nodo);
+      if (encontrados.length >= limite) break;
+    }
+  }
+  return encontrados;
+}
+
+/**
+ * Seguimiento de la ejecución.
+ *
+ * La cámara acompaña al nodo activo desplazándose junto a su punto de mira, así
+ * que **conserva el ángulo y la distancia que el usuario había elegido**: sigue
+ * el flujo sin arrebatarle el encuadre. El movimiento es una interpolación
+ * exponencial, igual que la inercia de los controles, para que no dé tirones.
+ */
+export function seguirNodo(
+  camera: THREE.Camera,
+  target: THREE.Vector3,
+  nodo: { x?: number; y?: number; z?: number } | undefined,
+  factor = 0.08,
+): void {
+  if (!nodo) return;
+  const destino = new THREE.Vector3(nodo.x ?? 0, nodo.y ?? 0, nodo.z ?? 0);
+  const paso = destino.sub(target).multiplyScalar(factor);
+  target.add(paso);
+  camera.position.add(paso);
+}
+
+/**
+ * Coloca el menú contextual junto al cursor sin que se salga del lienzo.
+ * Abrirlo cerca del borde derecho o inferior dejaría media lista fuera de
+ * pantalla, que es la forma habitual de que un menú así resulte inservible.
+ */
+export function posicionMenuContextual(
+  cursor: { x: number; y: number },
+  lienzo: { width: number; height: number },
+  menu: { width: number; height: number },
+): { x: number; y: number } {
+  return {
+    x: Math.max(0, Math.min(cursor.x, lienzo.width - menu.width)),
+    y: Math.max(0, Math.min(cursor.y, lienzo.height - menu.height)),
+  };
+}

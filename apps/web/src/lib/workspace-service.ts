@@ -1,3 +1,4 @@
+import { apiFetch, hasConfiguredApi } from "./api-client";
 import { DEMO_FLOW, DEMO_PROJECTS } from "@flowverse/core";
 import type { EditableFlow, FlowDefinition } from "@flowverse/core";
 
@@ -22,7 +23,6 @@ export interface FlowSummary {
   updatedAt: string;
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "");
 const FLOW_STORAGE_PREFIX = "flowverse:flow:";
 const DEMO_PROJECTS_STORAGE = "flowverse:demo-projects";
 const DEMO_FLOWS_STORAGE_PREFIX = "flowverse:demo-flows:";
@@ -149,10 +149,10 @@ function headers(): Record<string, string> {
 }
 
 export async function listProjects(): Promise<ProjectSummary[]> {
-  if (!API_URL) {
+  if (!hasConfiguredApi) {
     return demoProjects();
   }
-  const response = await fetch(`${API_URL}/v1/projects`, { credentials: "include" });
+  const response = await apiFetch(`/v1/projects`, {});
   if (!response.ok) throw await apiError(response, "No se pudieron cargar los proyectos.");
   const payload = await response.json() as { items?: ProjectSummary[]; data?: { items?: ProjectSummary[] } } | ProjectSummary[];
   if (Array.isArray(payload)) return payload;
@@ -160,7 +160,7 @@ export async function listProjects(): Promise<ProjectSummary[]> {
 }
 
 export async function createProject(input: { name: string; description: string }): Promise<ProjectSummary> {
-  if (!API_URL) {
+  if (!hasConfiguredApi) {
     const project: ProjectSummary = {
       id: `demo-${Date.now().toString(36)}`,
       ...input,
@@ -175,9 +175,8 @@ export async function createProject(input: { name: string; description: string }
     );
     return project;
   }
-  const response = await fetch(`${API_URL}/v1/projects`, {
+  const response = await apiFetch(`/v1/projects`, {
     method: "POST",
-    credentials: "include",
     headers: headers(),
     body: JSON.stringify(input),
   });
@@ -187,20 +186,20 @@ export async function createProject(input: { name: string; description: string }
 }
 
 export async function getProject(projectId: string): Promise<ProjectSummary> {
-  if (!API_URL) {
+  if (!hasConfiguredApi) {
     const demo = demoProjects().find((project) => project.id === projectId);
     if (!demo) throw notFound("El proyecto");
     return demo;
   }
   if (!isUuid(projectId)) throw notFound("El proyecto");
-  const response = await fetch(`${API_URL}/v1/projects/${encodeURIComponent(projectId)}`, { credentials: "include" });
+  const response = await apiFetch(`/v1/projects/${encodeURIComponent(projectId)}`, {});
   if (!response.ok) throw await apiError(response, "No se pudo cargar el proyecto.");
   const payload = await response.json() as ProjectSummary | { data: ProjectSummary };
   return "data" in payload ? payload.data : payload;
 }
 
 export async function listFlows(projectId: string): Promise<FlowSummary[]> {
-  if (!API_URL) {
+  if (!hasConfiguredApi) {
     const initial = DEMO_PROJECTS.some((project) => project.id === projectId)
       ? [{
         id: "pedidos",
@@ -216,14 +215,14 @@ export async function listFlows(projectId: string): Promise<FlowSummary[]> {
     return [...storedDemoFlows(projectId), ...initial];
   }
   if (!isUuid(projectId)) throw notFound("El proyecto");
-  const response = await fetch(`${API_URL}/v1/projects/${encodeURIComponent(projectId)}/flows`, { credentials: "include" });
+  const response = await apiFetch(`/v1/projects/${encodeURIComponent(projectId)}/flows`, {});
   if (!response.ok) throw await apiError(response, "No se pudieron cargar los flujos.");
   const payload = await response.json() as FlowSummary[] | { data: FlowSummary[] };
   return Array.isArray(payload) ? payload : payload.data;
 }
 
 export async function createFlow(projectId: string, name: string): Promise<FlowSummary> {
-  if (!API_URL) {
+  if (!hasConfiguredApi) {
     const id = `demo-flow-${Date.now().toString(36)}`;
     const now = new Date().toISOString();
     const definition = starterFlow(name);
@@ -255,9 +254,8 @@ export async function createFlow(projectId: string, name: string): Promise<FlowS
     return summary;
   }
   if (!isUuid(projectId)) throw notFound("El proyecto");
-  const response = await fetch(`${API_URL}/v1/projects/${encodeURIComponent(projectId)}/flows`, {
+  const response = await apiFetch(`/v1/projects/${encodeURIComponent(projectId)}/flows`, {
     method: "POST",
-    credentials: "include",
     headers: headers(),
     body: JSON.stringify({ name, description: "" }),
   });

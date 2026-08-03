@@ -1,7 +1,6 @@
 {
   "name": "@flowverse/codegraph",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "description": "Deriva un FlowDefinition a partir del código existente de un proyecto.",
   "exports": {
@@ -17,12 +16,14 @@
     "flowverse-codegraph": "./dist/cli.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "go"
   ],
   "sideEffects": false,
   "scripts": {
     "build": "tsup",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@flowverse/core": "workspace:*",
@@ -34,5 +35,13 @@
     "ajv-formats": "^3.0.1",
     "vitest": "^3.2.4",
     "@types/node": "^24.3.0"
+  },
+  "license": "UNLICENSED",
+  "publishConfig": {
+    "access": "restricted"
+  },
+  "repository": {
+    "type": "git",
+    "directory": "packages/codegraph"
   }
 }
