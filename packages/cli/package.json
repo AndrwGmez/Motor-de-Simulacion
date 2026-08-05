@@ -1,0 +1,53 @@
+{
+  "name": "@flowverse/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "CLI de FlowVerse para validar, comparar, simular y proteger cambios de flujos en CI.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "flowverse": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "pnpm test && pnpm typecheck && pnpm build"
+  },
+  "dependencies": {
+    "@flowverse/core": "workspace:*",
+    "@flowverse/engine": "workspace:*",
+    "ajv": "^8.17.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "license": "UNLICENSED",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AndrwGmez/Motor-de-Simulaci-n.git",
+    "directory": "packages/cli"
+  }
+}

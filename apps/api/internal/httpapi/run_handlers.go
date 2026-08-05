@@ -3,6 +3,7 @@ package httpapi
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -10,6 +11,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/flowverse/flowverse-api/internal/auth"
 	"github.com/flowverse/flowverse-api/internal/contract"
@@ -17,22 +20,27 @@ import (
 	"github.com/flowverse/flowverse-api/internal/engine"
 	"github.com/flowverse/flowverse-api/internal/runtime"
 	"github.com/flowverse/flowverse-api/internal/store"
+	"github.com/flowverse/flowverse-api/internal/telemetry"
 )
 
 type simulationRequest struct {
-	TriggerNodeID string         `json:"triggerNodeId"`
-	Input         map[string]any `json:"input"`
-	Overrides     []struct {
-		Type    string `json:"type"`
-		EdgeID  string `json:"edgeId,omitempty"`
-		NodeID  string `json:"nodeId,omitempty"`
-		Code    string `json:"code,omitempty"`
-		Message string `json:"message,omitempty"`
-	} `json:"overrides,omitempty"`
-	Limits struct {
-		MaxSteps         int `json:"maxSteps,omitempty"`
-		MaxVisitsPerNode int `json:"maxVisitsPerNode,omitempty"`
-	} `json:"limits,omitempty"`
+	TriggerNodeID string               `json:"triggerNodeId"`
+	Input         map[string]any       `json:"input"`
+	Overrides     []simulationOverride `json:"overrides,omitempty"`
+	Limits        *simulationLimits    `json:"limits,omitempty"`
+}
+
+type simulationOverride struct {
+	Type    string `json:"type"`
+	EdgeID  string `json:"edgeId,omitempty"`
+	NodeID  string `json:"nodeId,omitempty"`
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+type simulationLimits struct {
+	MaxSteps         *int `json:"maxSteps,omitempty"`
+	MaxVisitsPerNode *int `json:"maxVisitsPerNode,omitempty"`
 }
 
 func (s *Server) createRun(c *gin.Context) {
@@ -48,6 +56,10 @@ func (s *Server) createRun(c *gin.Context) {
 	if !bindJSON(c, &request) {
 		return
 	}
+	if err := validateSimulationRequest(request); err != nil {
+		writeError(c, http.StatusUnprocessableEntity, "run.invalid_request", "Simulation request violates the contract", gin.H{"reason": err.Error()})
+		return
+	}
 	overrides, err := convertOverrides(version.Definition, request)
 	if err != nil {
 		writeError(c, http.StatusBadRequest, "run.invalid_override", err.Error(), nil)
@@ -56,7 +68,8 @@ func (s *Server) createRun(c *gin.Context) {
 	runID := runtime.NewRunID()
 	timestamp := now()
 	run := domain.Run{
-		ID: runID, ProjectID: flow.ProjectID, FlowID: flow.ID, VersionID: version.ID,
+		ID: runID, TraceID: telemetry.TraceID(c.Request.Context()),
+		ProjectID: flow.ProjectID, FlowID: flow.ID, VersionID: version.ID,
 		Status: "created", Input: request.Input, TriggerID: request.TriggerNodeID,
 		Definition: version.Definition, DefinitionETag: version.Checksum, CreatedAt: timestamp,
 	}
@@ -79,11 +92,13 @@ func (s *Server) createRun(c *gin.Context) {
 		c.JSON(http.StatusOK, runView(stored))
 		return
 	}
+	simulationStarted := time.Now()
 	result, err := s.simulator.Run(version.Definition, engine.RunOptions{
 		RunID: runID, TriggerID: request.TriggerNodeID, Input: request.Input, Overrides: overrides,
-		MaxSteps: request.Limits.MaxSteps, MaxVisitsPerNode: request.Limits.MaxVisitsPerNode,
+		MaxSteps: request.maxSteps(), MaxVisitsPerNode: request.maxVisitsPerNode(),
 		StartedAt: timestamp,
 	})
+	recordSimulationTelemetry(c, simulationStarted, result, err)
 	if err != nil {
 		run.Status, run.Error = "failed", err.Error()
 		completed := now()
@@ -116,6 +131,10 @@ func (s *Server) createDraftRun(c *gin.Context) {
 	if !bindJSON(c, &request) {
 		return
 	}
+	if err := validateSimulationRequest(request); err != nil {
+		writeError(c, http.StatusUnprocessableEntity, "run.invalid_request", "Simulation request violates the contract", gin.H{"reason": err.Error()})
+		return
+	}
 	definition := flow.Draft.Clone().Normalize()
 	if validation := contract.ValidateFlow(definition); !validation.Valid {
 		writeError(c, http.StatusUnprocessableEntity, "run.invalid_flow", "Draft must pass validation before simulation", validation.Issues)
@@ -128,7 +147,8 @@ func (s *Server) createDraftRun(c *gin.Context) {
 	}
 	runID, timestamp := runtime.NewRunID(), now()
 	run := domain.Run{
-		ID: runID, ProjectID: flow.ProjectID, FlowID: flow.ID, Status: "created",
+		ID: runID, TraceID: telemetry.TraceID(c.Request.Context()),
+		ProjectID: flow.ProjectID, FlowID: flow.ID, Status: "created",
 		Input: request.Input, TriggerID: request.TriggerNodeID, Definition: definition,
 		DefinitionETag: flow.DraftETag, CreatedAt: timestamp,
 	}
@@ -152,10 +172,12 @@ func (s *Server) createDraftRun(c *gin.Context) {
 		c.JSON(http.StatusOK, runView(stored))
 		return
 	}
+	simulationStarted := time.Now()
 	result, err := s.simulator.Run(definition, engine.RunOptions{
 		RunID: runID, TriggerID: request.TriggerNodeID, Input: request.Input, Overrides: overrides,
-		MaxSteps: request.Limits.MaxSteps, MaxVisitsPerNode: request.Limits.MaxVisitsPerNode, StartedAt: timestamp,
+		MaxSteps: request.maxSteps(), MaxVisitsPerNode: request.maxVisitsPerNode(), StartedAt: timestamp,
 	})
+	recordSimulationTelemetry(c, simulationStarted, result, err)
 	if err != nil {
 		run.Status, run.Error = "failed", err.Error()
 		completed := now()
@@ -331,12 +353,14 @@ func (s *Server) liveTicket(c *gin.Context) {
 		return
 	}
 	expiresAt := now().Add(30 * time.Second)
-	scheme := "ws"
-	if c.Request.TLS != nil {
-		scheme = "wss"
+	websocketOrigin := strings.TrimRight(s.config.PublicWebSocketOrigin, "/")
+	if websocketOrigin == "" {
+		// Backwards-compatible fallback for embedded/test servers. Production
+		// startup always supplies the externally visible, validated origin.
+		websocketOrigin = "ws://" + c.Request.Host
 	}
-	url := scheme + "://" + c.Request.Host + "/v1/runs/" + run.ID + "/live?ticket=" + ticket
-	c.JSON(http.StatusCreated, gin.H{"ticket": ticket, "expiresAt": expiresAt, "url": url})
+	liveURL := websocketOrigin + "/v1/runs/" + run.ID + "/live?ticket=" + url.QueryEscape(ticket)
+	c.JSON(http.StatusCreated, gin.H{"ticket": ticket, "expiresAt": expiresAt, "url": liveURL})
 }
 
 func (s *Server) liveRun(c *gin.Context) {
@@ -569,10 +593,31 @@ func runView(run domain.Run) gin.H {
 	if run.Output != nil {
 		result = run.Output
 	}
-	return gin.H{
+	view := gin.H{
 		"id": run.ID, "flowVersionId": run.VersionID, "status": run.Status,
 		"triggerNodeId": run.TriggerID, "logicalTimeMs": logicalTime, "playbackSpeed": 1,
 		"createdAt": run.CreatedAt, "startedAt": run.StartedAt, "finishedAt": run.CompletedAt,
 		"result": result,
+	}
+	if run.TraceID != "" {
+		view["traceId"] = run.TraceID
+	}
+	return view
+}
+
+func recordSimulationTelemetry(c *gin.Context, started time.Time, result engine.SimulationResult, runErr error) {
+	status := result.Status
+	if runErr != nil {
+		status = "rejected"
+	}
+	telemetry.SimulationDuration(c.Request.Context(), time.Since(started), status)
+	span := trace.SpanFromContext(c.Request.Context())
+	span.SetAttributes(
+		attribute.String("flowverse.run.plan_status", status),
+		attribute.Int("flowverse.run.event_count", len(result.Events)),
+		attribute.Int("flowverse.run.node_visit_count", len(result.NodeRuns)),
+	)
+	if runErr != nil {
+		span.RecordError(runErr)
 	}
 }

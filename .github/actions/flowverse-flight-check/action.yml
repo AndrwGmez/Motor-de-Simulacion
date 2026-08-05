@@ -1,0 +1,90 @@
+name: FlowVerse PR Flight Check
+description: Valida un FlowDefinition y aplica una política de diff semántico sin credenciales externas.
+
+inputs:
+  flow-file:
+    description: Ruta del FlowDefinition candidato dentro del checkout.
+    required: true
+  baseline-file:
+    description: Ruta opcional del FlowDefinition base.
+    required: false
+    default: ""
+  fail-on:
+    description: Umbral del diff semántico; none, behavioral o breaking.
+    required: false
+    default: behavioral
+  sarif-file:
+    description: Archivo SARIF generado por el check.
+    required: false
+    default: flowverse-results.sarif
+  upload-sarif:
+    description: Sube el resultado a GitHub code scanning cuando vale true.
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Install pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: 10.15.0
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 24
+        cache: pnpm
+        cache-dependency-path: ${{ github.action_path }}/../../../pnpm-lock.yaml
+
+    - name: Install CLI workspace
+      shell: bash
+      env:
+        FLOWVERSE_ACTION_ROOT: ${{ github.action_path }}/../../..
+      run: pnpm --dir "$FLOWVERSE_ACTION_ROOT" install --frozen-lockfile --filter @flowverse/cli...
+
+    - name: Build CLI and semantic dependencies
+      shell: bash
+      env:
+        FLOWVERSE_ACTION_ROOT: ${{ github.action_path }}/../../..
+      run: pnpm --dir "$FLOWVERSE_ACTION_ROOT" --filter @flowverse/cli... build
+
+    - name: Run FlowVerse check
+      id: flight_check
+      continue-on-error: true
+      shell: bash
+      env:
+        FLOWVERSE_FLOW_FILE: ${{ inputs.flow-file }}
+        FLOWVERSE_BASELINE_FILE: ${{ inputs.baseline-file }}
+        FLOWVERSE_FAIL_ON: ${{ inputs.fail-on }}
+        FLOWVERSE_SARIF_FILE: ${{ inputs.sarif-file }}
+        FLOWVERSE_CLI_ENTRY: ${{ github.action_path }}/../../../packages/cli/dist/cli.js
+      run: |
+        args=(check "$FLOWVERSE_FLOW_FILE" --format sarif --output "$FLOWVERSE_SARIF_FILE")
+        if [[ -n "$FLOWVERSE_BASELINE_FILE" ]]; then
+          args+=(--baseline "$FLOWVERSE_BASELINE_FILE" --fail-on "$FLOWVERSE_FAIL_ON")
+        fi
+        set +e
+        node "$FLOWVERSE_CLI_ENTRY" "${args[@]}"
+        exit_code=$?
+        set -e
+        echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+        if [[ -s "$FLOWVERSE_SARIF_FILE" ]]; then
+          echo "sarif_created=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "sarif_created=false" >> "$GITHUB_OUTPUT"
+        fi
+        exit "$exit_code"
+
+    - name: Upload SARIF
+      if: ${{ always() && inputs.upload-sarif == 'true' && steps.flight_check.outputs.sarif_created == 'true' }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.sarif-file }}
+
+    - name: Enforce Flight Check result
+      if: ${{ always() && steps.flight_check.outputs.exit_code != '0' }}
+      shell: bash
+      env:
+        FLOWVERSE_EXIT_CODE: ${{ steps.flight_check.outputs.exit_code }}
+      run: exit "$FLOWVERSE_EXIT_CODE"

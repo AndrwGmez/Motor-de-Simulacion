@@ -29,6 +29,18 @@ jobs:
       - run: pnpm install --frozen-lockfile --filter @flowverse/contracts...
       - run: pnpm contracts:check
 
+  flight-check:
+    name: FlowVerse PR Flight Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/flowverse-flight-check
+        with:
+          flow-file: packages/contracts/fixtures/valid/order-processing.flow.json
+          baseline-file: packages/contracts/fixtures/valid/order-processing.flow.json
+          fail-on: behavioral
+          upload-sarif: "false"
+
   api:
     name: API
     runs-on: ubuntu-latest

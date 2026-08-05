@@ -27,6 +27,7 @@ type RunIdempotency struct {
 }
 
 type Repository interface {
+	RunCoordinator
 	CreateUser(context.Context, domain.User) error
 	UserByID(context.Context, string) (domain.User, error)
 	UserByEmail(context.Context, string) (domain.User, error)
@@ -58,6 +59,7 @@ type Repository interface {
 	CreateRun(context.Context, domain.Run, RunIdempotency) (domain.Run, bool, error)
 	RunByID(context.Context, string) (domain.Run, error)
 	UpdateRun(context.Context, domain.Run) error
+	AppendRunEvent(context.Context, domain.Run, domain.Event) error
 	ListRuns(context.Context, string) ([]domain.Run, error)
 	InterruptActiveRuns(context.Context, time.Time) (int, error)
 

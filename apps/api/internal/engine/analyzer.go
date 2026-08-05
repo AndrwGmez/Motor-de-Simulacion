@@ -6,6 +6,11 @@ import (
 	"github.com/flowverse/flowverse-api/internal/domain"
 )
 
+// Cyclic graphs require enumerating simple paths, which is exponential in the
+// worst case. DAGs are counted exactly with dynamic programming; this budget is
+// only the hard stop for the cyclic fallback.
+const pathCountWorkBudget = 100_000
+
 func Analyze(flow domain.FlowDefinition) domain.Analysis {
 	result := domain.Analysis{
 		NodeCount: len(flow.Nodes), EdgeCount: len(flow.Edges),
@@ -101,10 +106,6 @@ func Analyze(flow domain.FlowDefinition) domain.Analysis {
 			result.Cycles = append(result.Cycles, domain.Cycle{NodeIDs: component, HasExit: hasExit})
 		}
 	}
-	if len(result.Cycles) > 0 {
-		result.CriticalPathApplies = false
-	}
-
 	// Compute depth on the SCC-condensed DAG.
 	dag := map[int]map[int]bool{}
 	indegree := make([]int, len(components))
@@ -154,9 +155,7 @@ func Analyze(flow domain.FlowDefinition) domain.Analysis {
 	}
 
 	result.PathCount, result.PathsTruncated = countPaths(flow, adj, 100)
-	if result.CriticalPathApplies {
-		result.CriticalPathNodeIDs, result.CriticalPathMS = longestPath(flow, adj, reverse)
-	}
+	result.CriticalPathNodeIDs, result.CriticalPathMS, result.CriticalPathApplies = longestPath(flow)
 	return result
 }
 
@@ -233,6 +232,13 @@ func undirectedComponentCount(nodes map[string]domain.Node, adj, reverse map[str
 }
 
 func countPaths(flow domain.FlowDefinition, adj map[string][]string, limit int) (int, bool) {
+	return countPathsWithBudget(flow, adj, limit, pathCountWorkBudget)
+}
+
+func countPathsWithBudget(flow domain.FlowDefinition, adj map[string][]string, limit, workBudget int) (int, bool) {
+	if limit <= 0 {
+		return 0, false
+	}
 	nodes := map[string]domain.Node{}
 	triggers := []string{}
 	for _, node := range flow.Nodes {
@@ -241,80 +247,348 @@ func countPaths(flow domain.FlowDefinition, adj map[string][]string, limit int) 
 			triggers = append(triggers, node.ID)
 		}
 	}
-	count, truncated := 0, false
-	var walk func(string, map[string]bool)
-	walk = func(id string, path map[string]bool) {
-		if truncated {
-			return
+	sort.Strings(triggers)
+
+	// Ignore malformed references and stop traversal at end nodes, matching the
+	// simulator and the previous path-count semantics.
+	graph := make(map[string][]string, len(nodes))
+	reverse := make(map[string][]string, len(nodes))
+	for source, targets := range adj {
+		node, exists := nodes[source]
+		if !exists || node.Type == domain.NodeEnd {
+			continue
 		}
-		if path[id] {
-			return
-		}
-		if nodes[id].Type == domain.NodeEnd {
-			count++
-			if count >= limit {
-				truncated = true
+		for _, target := range targets {
+			if _, exists := nodes[target]; !exists {
+				continue
 			}
-			return
+			graph[source] = append(graph[source], target)
+			reverse[target] = append(reverse[target], source)
 		}
-		nextPath := make(map[string]bool, len(path)+1)
-		for key, value := range path {
-			nextPath[key] = value
+	}
+	for id := range graph {
+		sort.Strings(graph[id])
+	}
+
+	reachable := map[string]bool{}
+	queue := make([]string, 0, len(nodes))
+	for _, trigger := range triggers {
+		if !reachable[trigger] {
+			reachable[trigger] = true
+			queue = append(queue, trigger)
 		}
-		nextPath[id] = true
-		for _, target := range adj[id] {
-			walk(target, nextPath)
+	}
+	for head := 0; head < len(queue); head++ {
+		for _, target := range graph[queue[head]] {
+			if !reachable[target] {
+				reachable[target] = true
+				queue = append(queue, target)
+			}
+		}
+	}
+
+	// Pruning nodes that cannot reach an end avoids spending the cyclic budget
+	// on dead subgraphs and lets us return an exact zero when no path can finish.
+	canReachEnd := map[string]bool{}
+	queue = queue[:0]
+	for id, node := range nodes {
+		if reachable[id] && node.Type == domain.NodeEnd {
+			canReachEnd[id] = true
+			queue = append(queue, id)
+		}
+	}
+	for head := 0; head < len(queue); head++ {
+		for _, source := range reverse[queue[head]] {
+			if reachable[source] && !canReachEnd[source] {
+				canReachEnd[source] = true
+				queue = append(queue, source)
+			}
+		}
+	}
+	relevantCount := 0
+	for id := range nodes {
+		if reachable[id] && canReachEnd[id] {
+			relevantCount++
+		}
+	}
+	if relevantCount == 0 {
+		return 0, false
+	}
+
+	// A topological pass detects the common acyclic case and enables exact,
+	// saturated dynamic programming in O(V+E), even when the number of paths is
+	// astronomically large.
+	indegree := map[string]int{}
+	for id := range nodes {
+		if reachable[id] && canReachEnd[id] {
+			indegree[id] = 0
+		}
+	}
+	for source, targets := range graph {
+		if _, relevant := indegree[source]; !relevant {
+			continue
+		}
+		for _, target := range targets {
+			if _, relevant := indegree[target]; relevant {
+				indegree[target]++
+			}
+		}
+	}
+	topologicalQueue := make([]string, 0, relevantCount)
+	for id, degree := range indegree {
+		if degree == 0 {
+			topologicalQueue = append(topologicalQueue, id)
+		}
+	}
+	sort.Strings(topologicalQueue)
+	order := make([]string, 0, relevantCount)
+	for head := 0; head < len(topologicalQueue); head++ {
+		id := topologicalQueue[head]
+		order = append(order, id)
+		for _, target := range graph[id] {
+			if _, relevant := indegree[target]; !relevant {
+				continue
+			}
+			indegree[target]--
+			if indegree[target] == 0 {
+				topologicalQueue = append(topologicalQueue, target)
+			}
+		}
+	}
+	if len(order) == relevantCount {
+		cap := limit + 1
+		pathsFrom := make(map[string]int, relevantCount)
+		for index := len(order) - 1; index >= 0; index-- {
+			id := order[index]
+			if nodes[id].Type == domain.NodeEnd {
+				pathsFrom[id] = 1
+				continue
+			}
+			for _, target := range graph[id] {
+				if !canReachEnd[target] {
+					continue
+				}
+				pathsFrom[id] = saturatedAdd(pathsFrom[id], pathsFrom[target], cap)
+			}
+		}
+		count := 0
+		for _, trigger := range triggers {
+			count = saturatedAdd(count, pathsFrom[trigger], cap)
+		}
+		if count > limit {
+			return limit, true
+		}
+		return count, false
+	}
+
+	// Exact simple-path counting is #P-complete once cycles are present. Use an
+	// iterative DFS (bounded stack, no per-branch map copies) and report a
+	// conservative truncation if its deterministic work budget is exhausted.
+	type pathFrame struct {
+		id      string
+		next    int
+		entered bool
+	}
+	count, work := 0, 0
+	path := map[string]bool{}
+	for _, trigger := range triggers {
+		if !canReachEnd[trigger] {
+			continue
+		}
+		stack := []pathFrame{{id: trigger}}
+		for len(stack) > 0 {
+			frame := &stack[len(stack)-1]
+			if !frame.entered {
+				if work >= workBudget {
+					return count, true
+				}
+				work++
+				frame.entered = true
+				if nodes[frame.id].Type == domain.NodeEnd {
+					count++
+					stack = stack[:len(stack)-1]
+					if count > limit {
+						return limit, true
+					}
+					continue
+				}
+				path[frame.id] = true
+			}
+			if frame.next >= len(graph[frame.id]) {
+				delete(path, frame.id)
+				stack = stack[:len(stack)-1]
+				continue
+			}
+			if work >= workBudget {
+				return count, true
+			}
+			work++
+			target := graph[frame.id][frame.next]
+			frame.next++
+			if path[target] || !canReachEnd[target] {
+				continue
+			}
+			stack = append(stack, pathFrame{id: target})
+		}
+	}
+	return count, false
+}
+
+func saturatedAdd(left, right, cap int) int {
+	if left >= cap || right >= cap-left {
+		return cap
+	}
+	return left + right
+}
+
+// longestPath computes an executable trigger-to-end path only. Visual groups,
+// malformed references, disconnected components and dead branches cannot be a
+// production critical path. Cycles matter only when they belong to that
+// reachable-and-terminating subgraph.
+func longestPath(flow domain.FlowDefinition) ([]string, int64, bool) {
+	nodes := map[string]domain.Node{}
+	triggers := []string{}
+	for _, node := range flow.Nodes {
+		if node.Type == domain.NodeGroup || node.ID == "" {
+			continue
+		}
+		nodes[node.ID] = node
+		if node.Type == domain.NodeTrigger {
+			triggers = append(triggers, node.ID)
 		}
 	}
 	sort.Strings(triggers)
-	for _, trigger := range triggers {
-		walk(trigger, map[string]bool{})
-	}
-	return count, truncated
-}
 
-func longestPath(flow domain.FlowDefinition, adj, reverse map[string][]string) ([]string, int64) {
-	nodes := map[string]domain.Node{}
-	indegree := map[string]int{}
-	for _, node := range flow.Nodes {
-		nodes[node.ID] = node
+	adj, reverse := map[string][]string{}, map[string][]string{}
+	for _, edge := range flow.Edges {
+		source, sourceOK := nodes[edge.Source]
+		if _, targetOK := nodes[edge.Target]; !sourceOK || !targetOK || source.Type == domain.NodeEnd {
+			continue
+		}
+		adj[edge.Source] = append(adj[edge.Source], edge.Target)
+		reverse[edge.Target] = append(reverse[edge.Target], edge.Source)
 	}
-	for id := range nodes {
-		indegree[id] = len(reverse[id])
+	for id := range adj {
+		sort.Strings(adj[id])
 	}
-	queue := []string{}
-	for id, degree := range indegree {
-		if degree == 0 {
+	for id := range reverse {
+		sort.Strings(reverse[id])
+	}
+
+	reachable := map[string]bool{}
+	queue := append([]string(nil), triggers...)
+	for _, trigger := range triggers {
+		reachable[trigger] = true
+	}
+	for head := 0; head < len(queue); head++ {
+		for _, target := range adj[queue[head]] {
+			if !reachable[target] {
+				reachable[target] = true
+				queue = append(queue, target)
+			}
+		}
+	}
+
+	canReachEnd := map[string]bool{}
+	queue = queue[:0]
+	for id, node := range nodes {
+		if reachable[id] && node.Type == domain.NodeEnd {
+			canReachEnd[id] = true
 			queue = append(queue, id)
 		}
 	}
 	sort.Strings(queue)
-	distance := map[string]int64{}
-	previous := map[string]string{}
-	for len(queue) > 0 {
-		id := queue[0]
-		queue = queue[1:]
-		base := distance[id] + nodes[id].DurationMS
-		for _, target := range adj[id] {
-			currentDistance, reached := distance[target]
-			if !reached || base > currentDistance {
-				distance[target] = base
-				previous[target] = id
-			}
-			indegree[target]--
-			if indegree[target] == 0 {
-				queue = append(queue, target)
-				sort.Strings(queue)
+	for head := 0; head < len(queue); head++ {
+		for _, source := range reverse[queue[head]] {
+			if reachable[source] && !canReachEnd[source] {
+				canReachEnd[source] = true
+				queue = append(queue, source)
 			}
 		}
 	}
+
+	indegree := map[string]int{}
+	for id := range nodes {
+		if reachable[id] && canReachEnd[id] {
+			indegree[id] = 0
+		}
+	}
+	if len(indegree) == 0 {
+		return nil, 0, false
+	}
+	for source, targets := range adj {
+		if _, relevant := indegree[source]; !relevant {
+			continue
+		}
+		for _, target := range targets {
+			if _, relevant := indegree[target]; relevant {
+				indegree[target]++
+			}
+		}
+	}
+	topological := []string{}
+	for id, degree := range indegree {
+		if degree == 0 {
+			topological = append(topological, id)
+		}
+	}
+	sort.Strings(topological)
+	order := make([]string, 0, len(indegree))
+	for head := 0; head < len(topological); head++ {
+		id := topological[head]
+		order = append(order, id)
+		for _, target := range adj[id] {
+			if _, relevant := indegree[target]; !relevant {
+				continue
+			}
+			indegree[target]--
+			if indegree[target] == 0 {
+				topological = append(topological, target)
+			}
+		}
+	}
+	if len(order) != len(indegree) {
+		return nil, 0, false
+	}
+
+	distance := map[string]int64{}
+	previous := map[string]string{}
+	for _, trigger := range triggers {
+		if _, relevant := indegree[trigger]; relevant {
+			distance[trigger] = effectiveDuration(nodes[trigger])
+		}
+	}
+	for _, id := range order {
+		base, reached := distance[id]
+		if !reached {
+			continue
+		}
+		for _, target := range adj[id] {
+			if _, relevant := indegree[target]; !relevant {
+				continue
+			}
+			candidate := base + effectiveDuration(nodes[target])
+			current, targetReached := distance[target]
+			if !targetReached || candidate > current {
+				distance[target] = candidate
+				previous[target] = id
+			}
+		}
+	}
+
 	bestID := ""
 	var best int64
 	for id, node := range nodes {
-		value := distance[id] + node.DurationMS
-		if value > best || value == best && id < bestID {
+		if node.Type != domain.NodeEnd || !canReachEnd[id] {
+			continue
+		}
+		value, reached := distance[id]
+		if reached && (bestID == "" || value > best || value == best && id < bestID) {
 			best, bestID = value, id
 		}
+	}
+	if bestID == "" {
+		return nil, 0, false
 	}
 	path := []string{}
 	for id := bestID; id != ""; id = previous[id] {
@@ -323,5 +597,5 @@ func longestPath(flow domain.FlowDefinition, adj, reverse map[string][]string) (
 	for left, right := 0, len(path)-1; left < right; left, right = left+1, right-1 {
 		path[left], path[right] = path[right], path[left]
 	}
-	return path, best
+	return path, best, true
 }

@@ -15,7 +15,10 @@
     "incremental": true,
     "plugins": [{ "name": "next" }],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@flowverse/core": ["../../packages/core/src/index.ts"],
+      "@flowverse/engine": ["../../packages/engine/src/index.ts"],
+      "@flowverse/viewer": ["../../packages/viewer/src/index.ts"]
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],

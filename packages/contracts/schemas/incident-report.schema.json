@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://flowverse.dev/schemas/incident-report.schema.json",
+  "title": "IncidentTimeMachineReport",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "runId", "flowId", "status", "createdAt", "summary", "integrity", "timeline"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "runId": { "type": "string", "format": "uuid" },
+    "traceId": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+    "flowId": { "type": "string", "format": "uuid" },
+    "flowVersionId": { "type": "string", "format": "uuid" },
+    "definitionEtag": { "type": "string" },
+    "status": { "type": "string" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "startedAt": { "type": "string", "format": "date-time" },
+    "completedAt": { "type": "string", "format": "date-time" },
+    "error": { "type": "string" },
+    "summary": { "$ref": "#/$defs/summary" },
+    "integrity": { "$ref": "#/$defs/integrity" },
+    "rootCause": { "$ref": "#/$defs/rootCause" },
+    "timeline": {
+      "type": "array",
+      "maxItems": 100000,
+      "items": { "$ref": "#/$defs/frame" }
+    }
+  },
+  "$defs": {
+    "stringList": { "type": "array", "items": { "type": "string" } },
+    "integerList": { "type": "array", "items": { "type": "integer", "minimum": 1 } },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["eventCount", "logicalDurationMs", "visitedNodeIds", "traversedEdgeIds", "failedNodeIds"],
+      "properties": {
+        "eventCount": { "type": "integer", "minimum": 0 },
+        "logicalDurationMs": { "type": "integer", "minimum": 0 },
+        "visitedNodeIds": { "$ref": "#/$defs/stringList" },
+        "traversedEdgeIds": { "$ref": "#/$defs/stringList" },
+        "failedNodeIds": { "$ref": "#/$defs/stringList" }
+      }
+    },
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["complete", "firstSequence", "lastSequence", "missingSequences", "duplicateSequences"],
+      "properties": {
+        "complete": { "type": "boolean" },
+        "firstSequence": { "type": "integer", "minimum": 0 },
+        "lastSequence": { "type": "integer", "minimum": 0 },
+        "missingSequences": { "$ref": "#/$defs/integerList" },
+        "duplicateSequences": { "$ref": "#/$defs/integerList" }
+      }
+    },
+    "rootCause": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sequence", "type", "message"],
+      "properties": {
+        "sequence": { "type": "integer", "minimum": 0 },
+        "type": { "type": "string" },
+        "nodeId": { "type": "string" },
+        "code": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    },
+    "frame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sequence", "occurredAt", "logicalTimeMs", "type", "category"],
+      "properties": {
+        "sequence": { "type": "integer", "minimum": 1 },
+        "occurredAt": { "type": "string", "format": "date-time" },
+        "logicalTimeMs": { "type": "integer", "minimum": 0 },
+        "type": { "type": "string" },
+        "category": { "enum": ["node", "edge", "control", "run", "system"] },
+        "nodeId": { "type": "string" },
+        "edgeId": { "type": "string" },
+        "message": { "type": "string" },
+        "payload": { "type": "object", "additionalProperties": true }
+      }
+    }
+  }
+}

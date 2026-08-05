@@ -103,10 +103,10 @@ export function validateFlow(flow: FlowDefinition): ValidationIssue[] {
     if (source.type === "group" || target.type === "group") {
       issues.push(issue("edge.group_connection", "error", "Los grupos son contenedores visuales y no admiten conexiones.", { edgeId: edge.id }));
     }
-    if (source.outputs.length > 0 && !source.outputs.some((port) => port.id === edge.sourcePort)) {
+    if (edge.sourcePort && !source.outputs.some((port) => port.id === edge.sourcePort)) {
       issues.push(issue("edge.missing_source_port", "error", `El puerto de salida “${edge.sourcePort}” no existe.`, { edgeId: edge.id }));
     }
-    if (target.inputs.length > 0 && !target.inputs.some((port) => port.id === edge.targetPort)) {
+    if (edge.targetPort && !target.inputs.some((port) => port.id === edge.targetPort)) {
       issues.push(issue("edge.missing_target_port", "error", `El puerto de entrada “${edge.targetPort}” no existe.`, { edgeId: edge.id }));
     }
   }

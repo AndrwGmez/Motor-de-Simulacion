@@ -15,13 +15,16 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 
 	"github.com/flowverse/flowverse-api/internal/auth"
+	"github.com/flowverse/flowverse-api/internal/copilot"
 	"github.com/flowverse/flowverse-api/internal/domain"
 	"github.com/flowverse/flowverse-api/internal/engine"
 	"github.com/flowverse/flowverse-api/internal/parser"
 	"github.com/flowverse/flowverse-api/internal/runtime"
 	"github.com/flowverse/flowverse-api/internal/store"
+	"github.com/flowverse/flowverse-api/internal/telemetry"
 )
 
 const (
@@ -31,19 +34,23 @@ const (
 )
 
 type Config struct {
-	PublicOrigin  string
-	SecureCookies bool
+	PublicOrigin          string
+	PublicWebSocketOrigin string
+	SecureCookies         bool
+	CopilotProvider       copilot.Provider
 }
 
 type Server struct {
 	repository   store.Repository
 	auth         *auth.Service
 	parser       parser.FlowParser
+	copilot      *copilot.Service
 	simulator    *engine.Simulator
 	runs         *runtime.Manager
 	config       Config
 	limiter      *rateLimiter
 	ratePolicies map[string]ratePolicy
+	admissions   map[string]*admissionGate
 }
 
 func New(repository store.Repository, authService *auth.Service, flowParser parser.FlowParser, runManager *runtime.Manager, config Config) *Server {
@@ -55,13 +62,30 @@ func New(repository store.Repository, authService *auth.Service, flowParser pars
 	}
 	return &Server{
 		repository: repository, auth: authService, parser: flowParser,
+		copilot:   copilot.NewService(config.CopilotProvider),
 		simulator: engine.NewSimulator(), runs: runManager, config: config,
 		limiter: newRateLimiter(10000, time.Minute, time.Now),
 		ratePolicies: map[string]ratePolicy{
-			"auth.register":    {Limit: 5, Window: 10 * time.Minute},
-			"auth.login":       {Limit: 10, Window: time.Minute},
-			"auth.refresh":     {Limit: 30, Window: time.Minute},
-			"flows.parse_text": {Limit: 10, Window: time.Minute},
+			"auth.register":     {Limit: 5, Window: 10 * time.Minute},
+			"auth.login":        {Limit: 10, Window: time.Minute},
+			"auth.refresh":      {Limit: 30, Window: time.Minute},
+			"flows.parse_text":  {Limit: 10, Window: time.Minute},
+			"flows.analyze":     {Limit: 30, Window: time.Minute},
+			"flows.diff":        {Limit: 60, Window: time.Minute},
+			"flows.copilot":     {Limit: 10, Window: time.Minute},
+			"runs.create":       {Limit: 20, Window: time.Minute},
+			"enterprise.write":  {Limit: 60, Window: time.Minute},
+			"enterprise.eval":   {Limit: 120, Window: time.Minute},
+			"enterprise.verify": {Limit: 6, Window: time.Minute},
+		},
+		admissions: map[string]*admissionGate{
+			"flows.analyze":     newAdmissionGate(4),
+			"flows.diff":        newAdmissionGate(4),
+			"flows.copilot":     newAdmissionGate(2),
+			"runs.create":       newAdmissionGate(2),
+			"enterprise.write":  newAdmissionGate(4),
+			"enterprise.eval":   newAdmissionGate(8),
+			"enterprise.verify": newAdmissionGate(2),
 		},
 	}
 }
@@ -69,7 +93,15 @@ func New(repository store.Repository, authService *auth.Service, flowParser pars
 func (s *Server) Router() *gin.Engine {
 	router := gin.New()
 	_ = router.SetTrustedProxies(nil)
-	router.Use(gin.Recovery(), s.securityHeaders(), s.requestID(), s.cors(), bodyLimit())
+	router.Use(
+		gin.Recovery(),
+		s.securityHeaders(),
+		s.requestID(),
+		otelgin.Middleware("flowverse-api", otelgin.WithFilter(shouldTraceRequest)),
+		s.traceID(),
+		s.cors(),
+		bodyLimit(),
+	)
 	router.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	router.GET("/readyz", s.readiness)
 	router.GET("/health/live", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
@@ -87,6 +119,30 @@ func (s *Server) Router() *gin.Engine {
 	secured := v1.Group("")
 	secured.Use(s.requireAuth(), s.csrf())
 	secured.GET("/auth/me", s.me)
+
+	secured.POST("/organizations", s.rateLimit("enterprise.write"), s.admit("enterprise.write"), s.createOrganization)
+	secured.GET("/organizations", s.listOrganizations)
+	secured.GET("/organizations/:organizationId", s.getOrganization)
+	secured.GET("/organizations/:organizationId/members", s.listOrganizationMembers)
+	secured.POST("/organizations/:organizationId/members", s.rateLimit("enterprise.write"), s.admit("enterprise.write"), s.setOrganizationMember)
+	secured.GET("/organizations/:organizationId/sso-connections", s.listSSOConnections)
+	secured.POST("/organizations/:organizationId/sso-connections", s.rateLimit("enterprise.write"), s.admit("enterprise.write"), s.createSSOConnection)
+	secured.GET("/organizations/:organizationId/sso-connections/:connectionId", s.getSSOConnection)
+	secured.PUT("/organizations/:organizationId/sso-connections/:connectionId", s.rateLimit("enterprise.write"), s.admit("enterprise.write"), s.updateSSOConnection)
+	secured.GET("/organizations/:organizationId/policy-rules", s.listPolicyRules)
+	secured.POST("/organizations/:organizationId/policy-rules", s.rateLimit("enterprise.write"), s.admit("enterprise.write"), s.createPolicyRule)
+	secured.GET("/organizations/:organizationId/policy-rules/:ruleId", s.getPolicyRule)
+	secured.PUT("/organizations/:organizationId/policy-rules/:ruleId", s.rateLimit("enterprise.write"), s.admit("enterprise.write"), s.updatePolicyRule)
+	secured.DELETE("/organizations/:organizationId/policy-rules/:ruleId", s.rateLimit("enterprise.write"), s.admit("enterprise.write"), s.deletePolicyRule)
+	secured.POST("/organizations/:organizationId/policy/evaluate", s.rateLimit("enterprise.eval"), s.admit("enterprise.eval"), s.evaluateOrganizationPolicy)
+	secured.GET("/organizations/:organizationId/plugins", s.listPluginRegistrations)
+	secured.POST("/organizations/:organizationId/plugins", s.rateLimit("enterprise.write"), s.admit("enterprise.write"), s.createPluginRegistration)
+	secured.GET("/organizations/:organizationId/plugins/:registrationId", s.getPluginRegistration)
+	secured.PATCH("/organizations/:organizationId/plugins/:registrationId", s.rateLimit("enterprise.write"), s.admit("enterprise.write"), s.updatePluginRegistrationStatus)
+	secured.GET("/organizations/:organizationId/audit", s.listOrganizationAudit)
+	secured.GET("/organizations/:organizationId/audit/verify", s.rateLimit("enterprise.verify"), s.admit("enterprise.verify"), s.verifyOrganizationAudit)
+	secured.GET("/organizations/:organizationId/projects", s.listOrganizationProjects)
+	secured.POST("/organizations/:organizationId/projects/:projectId/attach", s.rateLimit("enterprise.write"), s.admit("enterprise.write"), s.attachOrganizationProject)
 
 	secured.POST("/projects", s.createProject)
 	secured.GET("/projects", s.listProjects)
@@ -107,24 +163,28 @@ func (s *Server) Router() *gin.Engine {
 	secured.DELETE("/flows/:flowId", s.deleteFlow)
 	secured.GET("/flows/:flowId/draft", s.getFlowDraft)
 	secured.PUT("/flows/:flowId/draft", s.replaceFlowDraft)
+	secured.POST("/flows/:flowId/draft/restore", s.restoreFlowDraft)
 	secured.POST("/flows/:flowId/versions", s.publishVersion)
 	secured.POST("/flows/:flowId/publish", s.publishVersion)
 	secured.GET("/flows/:flowId/versions", s.listVersions)
+	secured.GET("/flows/:flowId/diff", s.rateLimit("flows.diff"), s.admit("flows.diff"), s.diffFlowRevisions)
+	secured.POST("/flows/:flowId/copilot", s.rateLimit("flows.copilot"), s.admit("flows.copilot"), s.adviseFlow)
 	secured.GET("/flows/:flowId/runs", s.listRuns)
-	secured.POST("/flows/:flowId/runs", s.createDraftRun)
+	secured.POST("/flows/:flowId/runs", s.rateLimit("runs.create"), s.admit("runs.create"), s.createDraftRun)
 	secured.POST("/flows/:flowId/validate", s.validateDraft)
-	secured.POST("/flows/:flowId/analyze", s.analyzeDraft)
+	secured.POST("/flows/:flowId/analyze", s.rateLimit("flows.analyze"), s.admit("flows.analyze"), s.analyzeDraft)
 
 	secured.GET("/flow-versions/:versionId", s.getVersion)
 	secured.POST("/flow-versions/:versionId/validate", s.validateVersion)
-	secured.POST("/flow-versions/:versionId/analyze", s.analyzeVersion)
-	secured.GET("/flow-versions/:versionId/analysis", s.analyzeVersion)
-	secured.POST("/flow-versions/:versionId/runs", s.createRun)
+	secured.POST("/flow-versions/:versionId/analyze", s.rateLimit("flows.analyze"), s.admit("flows.analyze"), s.analyzeVersion)
+	secured.GET("/flow-versions/:versionId/analysis", s.rateLimit("flows.analyze"), s.admit("flows.analyze"), s.analyzeVersion)
+	secured.POST("/flow-versions/:versionId/runs", s.rateLimit("runs.create"), s.admit("runs.create"), s.createRun)
 
 	secured.POST("/flows/import", s.importFlow)
 	secured.POST("/flows/parse-text", s.rateLimit("flows.parse_text"), s.parseText)
 
 	secured.GET("/runs/:runId", s.getRun)
+	secured.GET("/runs/:runId/incident", s.getRunIncident)
 	secured.GET("/runs/:runId/events", s.getRunEvents)
 	secured.POST("/runs/:runId/pause", s.pauseRun)
 	secured.POST("/runs/:runId/resume", s.resumeRun)
@@ -141,6 +201,13 @@ func (s *Server) Router() *gin.Engine {
 	secured.POST("/flows/:flowId/share-links", s.createShare)
 	secured.DELETE("/share-links/:shareId", s.revokeShare)
 	return router
+}
+
+func shouldTraceRequest(request *http.Request) bool {
+	path := request.URL.Path
+	return !strings.HasPrefix(path, "/health") && path != "/readyz" &&
+		!strings.HasPrefix(path, "/public/v1/shares/") &&
+		!strings.HasPrefix(path, "/v1/public/shares/")
 }
 
 func (s *Server) readiness(c *gin.Context) {
@@ -166,6 +233,15 @@ func (s *Server) requestID() gin.HandlerFunc {
 	}
 }
 
+func (s *Server) traceID() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if traceID := telemetry.TraceID(c.Request.Context()); traceID != "" {
+			c.Header("X-Trace-ID", traceID)
+		}
+		c.Next()
+	}
+}
+
 func (s *Server) securityHeaders() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("X-Content-Type-Options", "nosniff")
@@ -185,7 +261,7 @@ func (s *Server) cors() gin.HandlerFunc {
 			c.Header("Access-Control-Allow-Credentials", "true")
 			c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token, If-Match, Idempotency-Key, X-Request-ID")
 			c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-			c.Header("Access-Control-Expose-Headers", "ETag, X-Draft-Revision, X-Request-ID, Retry-After")
+			c.Header("Access-Control-Expose-Headers", "ETag, X-Draft-Revision, X-Request-ID, X-Trace-ID, Retry-After")
 		}
 		if c.Request.Method == http.MethodOptions {
 			if origin != "" && origin != s.config.PublicOrigin {
@@ -297,7 +373,7 @@ func bindJSON(c *gin.Context, target any) bool {
 	if err := decoder.Decode(target); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			writeError(c, http.StatusRequestEntityTooLarge, "request.too_large", "Request body exceeds 1 MiB", nil)
+			writeError(c, http.StatusRequestEntityTooLarge, "request.too_large", "Request body exceeds 24 MiB", nil)
 			return false
 		}
 		writeError(c, http.StatusBadRequest, "request.invalid_json", "Request body is invalid", gin.H{"reason": err.Error()})

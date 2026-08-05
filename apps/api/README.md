@@ -48,8 +48,8 @@ go run ./cmd/api
 ```
 
 `AUTO_MIGRATE=true` aplica las migraciones idempotentes embebidas al iniciar.
-En un despliegue administrado puede establecerse en `false` y ejecutar el SQL
-de `internal/store/migrations` como parte del release.
+En producción conviene dejarlo en `false` y ejecutar el SQL de
+`internal/store/migrations` como paso explícito del release.
 
 ## Configuración
 
@@ -58,14 +58,24 @@ de `internal/store/migrations` como parte del release.
 | `PORT` | `8080` | Puerto HTTP |
 | `APP_ENV` | `development` | Activa cookies `Secure` y Gin release en `production` |
 | `PUBLIC_ORIGIN` | `http://localhost:3000` | Origen CORS y WebSocket permitido |
+| `PUBLIC_WS_ORIGIN` | `ws://localhost:8080` | Origen público para el ticket y la URL WebSocket |
 | `STORE_DRIVER` | `memory` | `memory` o `postgres` |
 | `DATABASE_URL` | — | DSN requerido para PostgreSQL |
-| `AUTO_MIGRATE` | `true` | Aplica la migración embebida |
+| `AUTO_MIGRATE` | `true` | Aplica la migración embebida; en producción debe quedar `false` |
 | `ACCESS_TOKEN_TTL` | `15m` | Duración del token opaco de acceso |
 | `REFRESH_TOKEN_TTL` | `720h` | Duración y rotación de refresh |
 | `FLOW_PARSER_PROVIDER` | `mock` | `mock` u `openai` |
+| `COPILOT_PROVIDER` | `mock` | Copiloto determinista local u `openai` |
 | `OPENAI_API_KEY` | — | Solo necesaria con proveedor `openai` |
 | `OPENAI_MODEL` | `gpt-4.1-mini` | Modelo configurable de Responses API |
+| `OPENAI_COPILOT_MODEL` | valor de `OPENAI_MODEL` | Modelo independiente para recomendaciones |
+| `OTEL_ENABLED` | `false` | Activa exportación OTLP/HTTP de trazas y métricas |
+| `OTEL_SERVICE_NAME` | `flowverse-api` | Nombre del recurso OpenTelemetry |
+| `OTEL_SERVICE_VERSION` | `dev` | Versión desplegada que acompaña cada señal |
+| `OTEL_SAMPLE_RATIO` | `1` | Muestreo de trazas entre `0` y `1` |
+| `OTEL_METRIC_INTERVAL` | `30s` | Intervalo de exportación de métricas |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | SDK OTLP | Endpoint estándar del Collector o backend |
+| `OTEL_EXPORTER_OTLP_HEADERS` | — | Headers OTLP estándar; pueden contener credenciales |
 
 ## Arquitectura
 
@@ -75,9 +85,12 @@ internal/domain         contrato de dominio FlowDefinition y agregados
 internal/engine         condiciones, validación, análisis y simulación
 internal/auth           Argon2id, tokens opacos y refresh rotatorio
 internal/parser         proveedor mock y OpenAI Responses/Structured Outputs
+internal/copilot        evidencia minimizada, grounding y proveedores de consejo
 internal/runtime        pacing, controles, persistencia y fan-out WebSocket
 internal/store          Repository, memoria, PostgreSQL y migración
 internal/httpapi        Gin, autorización, REST, shares y WebSocket
+internal/telemetry      OpenTelemetry OTLP, propagación, trazas y métricas
+internal/incident       reconstrucción reproducible y diagnóstico de runs
 ```
 
 PostgreSQL conserva los documentos editables y publicados en JSONB. Las
@@ -94,10 +107,13 @@ Schema del mismo paquete. Las rutas principales son:
 - `/v1/projects/{projectId}/flows`: creación y listado.
 - `/v1/flows/{flowId}/draft`: documento editable con `ETag`/`If-Match`.
 - `/v1/flows/{flowId}/publish`: publicación inmutable.
+- `/v1/flows/{flowId}/diff`: comparación semántica versión/borrador.
+- `/v1/flows/{flowId}/copilot`: recomendaciones con citas verificadas.
 - `/v1/flow-versions/{versionId}/validate|analysis|runs`.
 - `/v1/flows/{flowId}/runs`: simulación del snapshot exacto del borrador.
 - `/v1/runs/{runId}/*`: consulta, eventos, pausa, resume, step, cancelación,
   velocidad y ticket WebSocket.
+- `/v1/runs/{runId}/incident`: línea de tiempo, integridad y causa raíz.
 - `/v1/flows/{flowId}/share-links` y `/public/v1/shares/{token}`.
 
 El token de un share se devuelve una sola vez junto con una URL de interfaz
@@ -146,6 +162,22 @@ produce un stream reproducible:
 La velocidad modifica únicamente el ritmo visual. El replay HTTP y WebSocket
 usa `afterSequence`; el ticket WebSocket es efímero y de un solo uso.
 
+Cada run conserva el `traceId` de la petición que lo creó. Con
+`OTEL_ENABLED=true`, el servidor instrumenta Gin, el cálculo de simulación y
+el playback asíncrono; también exporta contadores de runs/eventos e histogramas
+de análisis y simulación. Los exportadores leen las variables estándar
+`OTEL_EXPORTER_OTLP_*`, por lo que no acoplan el producto a un proveedor.
+
+Para comprobar el pipeline local sin credenciales externas, el perfil de
+Compose incluye un Collector oficial fijado y un exporter `debug`:
+
+```bash
+OTEL_ENABLED=true docker compose --profile observability up --build
+```
+
+`deploy/otel-collector.yaml` aplica `memory_limiter` y `batch`; en producción
+se sustituye `debug` por el backend OTLP elegido.
+
 Antes de aceptar tráfico, el bootstrap marca transaccionalmente como
 `interrupted` cualquier run persistido en estado activo y añade
 `run.interrupted` con la siguiente secuencia. La recuperación es idempotente y
@@ -158,6 +190,16 @@ adaptador llama `POST /v1/responses` con `store:false` y
 `text.format.type=json_schema`. Refusos, respuestas incompletas, timeouts y
 propuestas inválidas se devuelven como errores recuperables. El endpoint solo
 genera una previsualización: nunca persiste automáticamente la respuesta.
+
+## Copiloto con evidencia
+
+`POST /v1/flows/{flowId}/copilot` construye primero un paquete local y
+determinista con validación, análisis, nodos, conexiones y, si se solicitan,
+diff semántico e incidente. El proveedor recibe tipos, identificadores,
+métricas y nombres de claves, pero no valores de configuración, defaults,
+inputs, outputs ni payloads de eventos. Cada sugerencia debe citar IDs del
+paquete; el servidor elimina recomendaciones o acciones con referencias
+inventadas. `COPILOT_PROVIDER=mock` permite usar y probar todo el flujo sin red.
 
 ## Pruebas
 
@@ -188,7 +230,7 @@ go test ./...
 
 ## Seguridad y límites actuales
 
-- Máximo 1 MiB por request, 500 nodos y 1.000 conexiones.
+- Máximo 24 MiB por request, 5.000 nodos y 10.000 conexiones.
 - La importación rechaza propiedades desconocidas y contenido JSON adicional;
   las configuraciones y metadatos se validan según el tipo de nodo.
 - Rate limit por IP+ruta, con memoria acotada: registro 5/10 min, login
@@ -200,8 +242,8 @@ go test ./...
   como no encontrados.
 - Los enlaces públicos almacenan únicamente el hash del token y omiten inputs,
   outputs y contextos.
-- La primera versión opera con una sola instancia de API. Tickets, suscriptores
-  WebSocket y control activo viven en memoria; un reinicio conserva los eventos
-  PostgreSQL pero interrumpe una ejecución activa.
-- La tabla de auditoría está creada, pero la emisión completa de auditoría y la
-  exportación Prometheus quedan como endurecimiento posterior.
+- La coordinación activa sigue siendo por instancia: tickets, suscriptores
+  WebSocket y control de ejecución viven en memoria; PostgreSQL conserva los
+  eventos y el bootstrap recupera ejecuciones huérfanas tras un reinicio.
+- La auditoría encadenada del plano empresarial ya está disponible; la
+  exportación Prometheus queda como endurecimiento posterior.

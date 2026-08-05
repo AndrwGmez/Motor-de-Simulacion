@@ -5,12 +5,12 @@
 <h1 align="center">FlowVerse 3D</h1>
 
 <p align="center">
-  <strong>Ve el flujo. Prueba el sistema.</strong>
+  <strong>Diseña el flujo. Rompe el escenario. Explica el resultado.</strong>
 </p>
 
 <p align="center">
-  Convierte procesos y código existente en universos 2D/3D editables.<br />
-  Valida la ejecutabilidad del grafo, simula con tiempo lógico y observa cada evento.
+  El laboratorio visual para modelar sistemas, comparar cambios y ensayar fallos<br />
+  antes de que lleguen a producción.
 </p>
 
 <p align="center">
@@ -24,6 +24,10 @@
 
 <p align="center">
   <a href="#producto">Producto</a> ·
+  <a href="#laboratorio">Scenario Lab</a> ·
+  <a href="#forense">Time Machine</a> ·
+  <a href="#flight-check">CLI + CI</a> ·
+  <a href="#gobierno">Enterprise</a> ·
   <a href="#codigo-a-universo">Código → universo</a> ·
   <a href="#arquitectura">Arquitectura</a> ·
   <a href="#inicio-rapido">Inicio rápido</a> ·
@@ -43,7 +47,7 @@
 
 ## De procesos complejos a universos que puedes explorar
 
-FlowVerse reúne diseño, análisis y simulación en un mismo contrato. Puedes
+FlowVerse reúne diseño, análisis, simulación y gobierno en un mismo contrato. Puedes
 empezar desde un flujo inicial, importar JSON o CSV, describir un proceso en
 lenguaje natural o derivar el grafo directamente desde código TypeScript,
 JavaScript y Go.
@@ -51,9 +55,11 @@ JavaScript y Go.
 | Etapa | Qué sucede |
 |---|---|
 | **01 · Construye** | Modela ocho tipos de nodo en 2D o 3D. |
-| **02 · Valida** | Detecta rutas rotas, ciclos, puertos inválidos y problemas semánticos. |
-| **03 · Simula** | Recorre decisiones, forks, joins y fallos con tiempo lógico determinista. |
-| **04 · Comprende** | Inspecciona eventos, métricas, camino crítico, versiones y resultados. |
+| **02 · Compara** | Entiende el impacto real de cada cambio con diff semántico. |
+| **03 · Experimenta** | Ejecuta escenarios A/B, fallos y rutas forzadas de forma determinista. |
+| **04 · Investiga** | Reconstruye incidentes evento por evento con trazas correlacionadas. |
+| **05 · Automatiza** | Convierte las reglas del flujo en un gate reproducible para cada PR. |
+| **06 · Gobierna** | Aplica organizaciones, roles, políticas, plugins y auditoría verificable. |
 
 <p align="center">
   <a href="./docs/assets/flowverse-editor.webp">
@@ -67,12 +73,15 @@ JavaScript y Go.
 
 | Capacidad | Qué aporta |
 |---|---|
-| **Editor 2D/3D** | Paleta de nodos, inspector, undo/redo, autosave y seis layouts: libre, direccional, capas, cronología, clústeres y ejecución. |
+| **Editor 2D/3D** | Paleta, inspector, undo/redo, autosave serializado y seis layouts: libre, direccional, capas, cronología, clústeres y ejecución. |
 | **Entradas flexibles** | Edición manual, contrato JSON, CSV, propuesta desde texto y análisis estático de repositorios. |
-| **Validación y salud** | Alcanzabilidad, decisiones, ciclos, complejidad, rutas, profundidad y camino crítico. |
+| **Cambio seguro** | Versiones inmutables, diff semántico por identidad, impacto visual/conductual/ruptura y restauración con ETag. |
+| **Scenario Lab** | Experimentos A/B reproducibles con presets, fallos inyectados, rutas forzadas, deltas y veredicto. |
 | **Motor Go determinista** | Tiempo lógico, condiciones estructuradas, fan-out, joins `each`/`any`/`all`, ciclos acotados y mutaciones atómicas. |
-| **Observabilidad en vivo** | Eventos ordenados, pausa, reanudación, avance paso a paso, velocidad, cancelación, progreso y replay por secuencia. |
-| **Publicación segura** | Roles por proyecto, versiones inmutables y enlaces públicos de solo lectura sin contextos privados. |
+| **Investigación forense** | Incident Time Machine, raíz probable, integridad del timeline y correlación con trazas OpenTelemetry. |
+| **Copiloto con evidencia** | Recomendaciones ancladas a citas verificables del análisis, diff e incidente, sin enviar valores sensibles. |
+| **Entrega continua** | CLI `validate`/`diff`/`simulate`/`check`, salidas humana, JSON y SARIF, más PR Flight Check. |
+| **Gobierno empresarial** | Organizaciones, RBAC, configuración SSO, políticas deny-first, plugins con checksum y auditoría encadenada. |
 
 <p align="center">
   <a href="./docs/assets/flowverse-dashboard.webp">
@@ -81,6 +90,35 @@ JavaScript y Go.
 </p>
 
 <p align="center"><sub>Panel de proyectos en modo demo</sub></p>
+
+### Un ciclo de ingeniería, no una captura del diagrama
+
+| Pregunta | Superficie | Respuesta que entrega |
+|---|---|---|
+| ¿Este cambio altera el comportamiento? | **Diff semántico** | Entidades afectadas, impacto máximo y resumen estable. |
+| ¿Qué pasa si falla esta dependencia? | **Scenario Lab** | Dos ejecuciones comparables, divergencia, rutas y deltas. |
+| ¿Dónde empezó el incidente? | **Incident Time Machine** | Timeline reconstruido, causa probable, integridad y `traceId`. |
+| ¿Debemos aceptar este cambio? | **Copiloto + Flight Check** | Evidencia citada para humanos y una política automática para CI. |
+
+<a name="laboratorio"></a>
+
+## Scenario Lab · prueba hipótesis antes de desplegar
+
+El laboratorio ejecuta un control y un candidato bajo un plan explícito. Puedes
+comparar borrador contra versión, cambiar entradas, forzar una conexión o
+inyectar el fallo de un nodo. Como ambos lados usan el mismo motor determinista,
+el resultado se puede reproducir exactamente.
+
+- Presets para camino feliz, proveedor caído y rutas alternativas.
+- Comparación A/B de estado, pasos, duración lógica, camino crítico y recorrido.
+- Primera divergencia visible y conexiones añadidas o ausentes en cada ruta.
+- Veredicto automático con límites de seguridad para evitar experimentos sin cota.
+- Repetición exacta del plan desde el editor, sin rehacer la configuración.
+
+El diff semántico complementa el experimento: ignora el orden accidental de los
+arrays, conserva identidades estables y separa cambios `visual`, `behavioral` y
+`breaking`. Una versión anterior se puede inspeccionar y restaurar como nuevo
+borrador sin modificar la versión inmutable que le dio origen.
 
 <a name="codigo-a-universo"></a>
 
@@ -140,6 +178,65 @@ Go.
 
 <p align="center"><sub>Simulación pausada · ruta activa, progreso, estado y controles visibles</sub></p>
 
+<a name="forense"></a>
+
+## Incident Time Machine · vuelve al instante exacto
+
+Cada ejecución remota conserva una secuencia ordenada. Time Machine transforma
+esa historia en una investigación navegable: mueve el scrubber, observa el
+estado reconstruido de cada nodo, salta al origen probable y abre el elemento
+implicado en el grafo.
+
+La API verifica continuidad y orden antes de producir el informe. Si
+OpenTelemetry está activo, el `traceId` une la ejecución con las trazas y
+métricas exportadas por OTLP. El perfil opcional de Compose incluye un Collector
+local para empezar sin acoplar FlowVerse a un proveedor concreto.
+
+### Copiloto: conclusiones que se pueden comprobar
+
+El copiloto no recibe un volcado del proceso. Primero se construye evidencia
+mínima con identificadores, tipos, métricas, claves de configuración, análisis,
+diff e incidente; se excluyen valores de configuración y payloads de entrada,
+salida o eventos. Después, cada sugerencia se valida contra ese paquete:
+citas inventadas y acciones fuera de alcance se descartan.
+
+| El copiloto entrega | La interfaz permite |
+|---|---|
+| Hallazgos y limitaciones explícitas | Abrir la cita exacta que sustenta cada conclusión |
+| Recomendaciones priorizadas | Seleccionar el nodo o conexión involucrados |
+| Acciones acotadas y validadas | Abrir el nodo, la conexión o el incidente relacionado |
+| Respuesta en el idioma de la pregunta | Distinguir evidencia disponible de inferencias |
+
+El proveedor `mock` funciona sin red y hace reproducibles las pruebas. El
+proveedor OpenAI es opcional, usa una salida estructurada estricta, desactiva el
+almacenamiento de la respuesta y envía un identificador de seguridad derivado,
+no el identificador interno del usuario.
+
+<a name="flight-check"></a>
+
+## Del editor al pull request
+
+`@flowverse/cli` ejecuta las mismas reglas de contratos, diff y simulación sin
+depender de una API. Está preparado para publicarse como paquete y también se
+puede usar directamente desde este monorepo.
+
+```bash
+pnpm --filter @flowverse/cli build
+
+node packages/cli/dist/cli.js validate flow.json
+node packages/cli/dist/cli.js diff baseline.json candidate.json --json
+node packages/cli/dist/cli.js simulate flow.json --input @scenario.json
+node packages/cli/dist/cli.js check candidate.json \
+  --baseline baseline.json \
+  --fail-on behavioral \
+  --sarif --output flowverse.sarif
+```
+
+El **PR Flight Check** incluido en `.github/actions/flowverse-flight-check`
+puede bloquear errores de validación o cambios `behavioral`/`breaking`, y
+producir SARIF 2.1.0 para code scanning. No recibe tokens ni secretos: el
+workflow llamador decide si publica el artefacto.
+
 <a name="arquitectura"></a>
 
 ## Arquitectura
@@ -148,8 +245,8 @@ Todas las entradas convergen en un contrato canónico. Esa frontera mantiene
 desacoplados el editor, los motores, la API y los visores.
 
 ```mermaid
-flowchart LR
-  subgraph INPUTS[Entradas]
+flowchart TB
+  subgraph INPUTS[Diseña e importa]
     EDITOR[Editor manual]
     FILES[JSON / CSV]
     TEXT[Texto]
@@ -157,28 +254,49 @@ flowchart LR
   end
 
   FLOW[(FlowDefinition 1.0)]
-  VALIDATE{Validación}
-  VIEWER[Viewer 2D / 3D]
-  LOCAL[Motor local TS]
-  API[API Go]
-  ENGINE[Motor Go]
-  EVENTS[HTTP + WebSocket]
-  DB[(PostgreSQL)]
-  SHARE[Versiones + share]
+
+  subgraph VERIFY[Comprueba el cambio]
+    VALIDATE[Análisis O V+E]
+    DIFF[Diff semántico]
+    LAB[Scenario Lab A/B]
+    CLI[CLI + PR Flight Check]
+  end
+
+  subgraph RUNTIME[Ejecuta y observa]
+    LOCAL[Motor local TS]
+    API[API + motor Go]
+    EVENTS[HTTP + WebSocket]
+    DB[(PostgreSQL)]
+    OTEL[OpenTelemetry OTLP]
+  end
+
+  subgraph EXPLAIN[Explica y gobierna]
+    TIME[Incident Time Machine]
+    COPILOT[Copiloto con evidencia]
+    ENTERPRISE[Organizaciones · RBAC · políticas]
+    AUDIT[Plugins + auditoría verificable]
+  end
 
   EDITOR --> FLOW
   FILES --> FLOW
   TEXT --> FLOW
   CODE --> FLOW
   FLOW --> VALIDATE
-  VALIDATE --> VIEWER
+  FLOW --> DIFF
+  FLOW --> CLI
+  DIFF --> LAB
   VALIDATE --> LOCAL
-  VALIDATE --> API
-  API --> ENGINE
-  ENGINE --> EVENTS
-  EVENTS --> VIEWER
+  LAB --> LOCAL
+  LAB --> API
+  API --> EVENTS
   API <--> DB
-  API --> SHARE
+  API --> OTEL
+  EVENTS --> TIME
+  VALIDATE --> COPILOT
+  DIFF --> COPILOT
+  TIME --> COPILOT
+  ENTERPRISE --> API
+  ENTERPRISE --> AUDIT
 
   classDef source fill:#151a2e,stroke:#5e78ff,color:#f3f5ff
   classDef contract fill:#18233d,stroke:#40d4f2,color:#f3f5ff,stroke-width:2px
@@ -186,8 +304,8 @@ flowchart LR
   classDef success fill:#10281f,stroke:#37d6a0,color:#f3f5ff
   class EDITOR,FILES,TEXT,CODE source
   class FLOW contract
-  class VALIDATE,LOCAL,API,ENGINE runtime
-  class VIEWER,EVENTS,DB,SHARE success
+  class VALIDATE,DIFF,LAB,CLI,LOCAL,API runtime
+  class EVENTS,DB,OTEL,TIME,COPILOT,ENTERPRISE,AUDIT success
 ```
 
 ### Monorepo
@@ -200,8 +318,32 @@ flowchart LR
 | [`packages/engine`](packages/engine) | Validación, simulación local e importación CSV |
 | [`packages/viewer`](packages/viewer) | Visores React 2D/3D, cámara, layouts y rendimiento |
 | [`packages/codegraph`](packages/codegraph) | Análisis estático de TypeScript, JavaScript y Go |
+| [`packages/cli`](packages/cli) | CLI publicable y PR Flight Check para automatización |
 | [`packages/contracts`](packages/contracts) | JSON Schema, OpenAPI, AsyncAPI y fixtures canónicos |
 | [`samples`](samples) | Flujos listos para importar y generadores de carga |
+
+<a name="gobierno"></a>
+
+## Gobierno empresarial sin cajas negras
+
+El plano de control empresarial mantiene el aislamiento por organización desde
+la consulta hasta la transacción. Los recursos ajenos se ocultan como no
+encontrados y cada mutación se confirma junto con su evento de auditoría.
+
+| Control | Garantía |
+|---|---|
+| **Organizaciones y miembros** | Roles `owner`, `admin`, `member` y `auditor`; nunca se puede eliminar el último owner activo. |
+| **Proyectos** | La asociación exige administrar la organización y ser owner del proyecto. |
+| **SSO** | Registro seguro de metadatos OIDC/SAML, dominios y huellas; no almacena secretos. |
+| **Políticas** | Evaluación determinista, default-deny y precedencia explícita de `deny`; comodines acotados. |
+| **Plugins** | Fuente, versión, capacidades y checksum SHA-256 por tenant; una revocación es irreversible. |
+| **Auditoría** | Secuencia contigua y hash encadenado verificable, con la escritura dentro de la misma transacción del cambio. |
+
+> [!NOTE]
+> El control plane administra la configuración SSO, pero esta versión todavía
+> no implementa el redirect/callback de login federado contra un IdP real. Las
+> integraciones externas y sus secretos siguen siendo responsabilidad del
+> despliegue que las habilite.
 
 <a name="inicio-rapido"></a>
 
@@ -226,6 +368,17 @@ docker compose up --build
 
 Detén los contenedores con `docker compose down`. El volumen de PostgreSQL se
 conserva entre reinicios.
+
+Para activar trazas y métricas OTLP junto con el Collector incluido:
+
+```bash
+OTEL_ENABLED=true docker compose --profile observability up --build
+```
+
+El receptor OTLP/HTTP queda en `127.0.0.1:4318`, OTLP/gRPC en
+`127.0.0.1:4317` y la salud del Collector en `127.0.0.1:13133`. El perfil usa
+el exportador `debug` como punto de partida; sustituirlo por el backend elegido
+no requiere cambiar la instrumentación de la API.
 
 ### Demo del frontend, sin API
 
@@ -275,13 +428,16 @@ expórtalas en la terminal antes de `go run`:
 
 ```bash
 export FLOW_PARSER_PROVIDER=openai
+export COPILOT_PROVIDER=openai
 export OPENAI_API_KEY='sk-...'
 export OPENAI_MODEL='gpt-4.1-mini' # opcional
+export OPENAI_COPILOT_MODEL='gpt-4.1-mini' # opcional e independiente
 ```
 
-La respuesta sigue siendo una previsualización validada: nunca se ejecuta ni
-se persiste automáticamente. El binario Go no carga archivos `.env` por sí
-solo.
+El parser sigue devolviendo una previsualización validada que nunca se ejecuta
+ni se persiste automáticamente. El copiloto devuelve únicamente sugerencias y
+acciones acotadas; tampoco muta el flujo. El binario Go no carga archivos
+`.env` por sí solo.
 
 </details>
 
@@ -291,6 +447,7 @@ solo.
 |---|---|
 | `pnpm contracts:check` | Esquemas, especificaciones y fixtures canónicos |
 | `pnpm test` | Contratos, paquetes del workspace y web; `codegraph` requiere Go |
+| `pnpm --filter @flowverse/cli test` | Comandos, políticas de salida y SARIF del CLI |
 | `cd apps/api && go test ./...` | Suite de la API y del motor Go |
 | `make test` | Contratos, API y web |
 | `make test-all` | Lo anterior, race detector y E2E en modo demo |
@@ -327,6 +484,12 @@ generar escenarios de escala.
 - Versiones publicadas inmutables.
 - Los enlaces públicos omiten los datos de entrada, salida y contexto de las
   ejecuciones.
+- El copiloto minimiza la evidencia, descarta citas no verificadas y nunca
+  recibe los valores de configuración ni los payloads de la ejecución.
+- Las consultas empresariales están acotadas por tenant; las mutaciones y su
+  auditoría encadenada se confirman atómicamente.
+- Políticas con default-deny en el evaluador, revocación irreversible de
+  plugins y protección concurrente del último owner activo.
 
 <a name="documentacion"></a>
 
@@ -341,14 +504,22 @@ generar escenarios de escala.
 | [Experiencia 3D](docs/3d-experience.md) | Interacción, cámara, layouts, accesibilidad y rendimiento |
 | [API y tiempo real](docs/api-realtime.md) | Recursos HTTP, eventos y WebSocket |
 | [Estrategia de pruebas](docs/testing.md) | Capas de prueba y escenarios full-stack |
+| [CLI y PR Flight Check](packages/cli/README.md) | Comandos, SARIF, políticas y uso en GitHub Actions |
+| [Operación de la API](apps/api/README.md) | Configuración productiva, OpenTelemetry y copiloto |
 | [OpenAPI](packages/contracts/openapi.yaml) · [AsyncAPI](packages/contracts/asyncapi.yaml) | Contratos de integración |
 
 ## Estado del proyecto
 
-La versión `0.1.0` implementa una vertical funcional del MVP: diseño,
-importación, análisis, simulación, persistencia, publicación y visualización.
-Integraciones con efectos reales, ejecución de código, colaboración simultánea,
-VR, BPMN y marketplace permanecen fuera del alcance actual.
+La versión `0.1.0` implementa una vertical funcional de plataforma: diseño,
+importación, análisis lineal, simulación, persistencia incremental, versionado,
+diff y restauración; además incorpora Scenario Lab, investigación de incidentes,
+OpenTelemetry, CLI/CI, copiloto con evidencia y el núcleo de gobierno
+empresarial.
+
+Las integraciones con efectos reales, la ejecución de código suministrado por
+usuarios, el login federado completo, la colaboración simultánea, VR, BPMN y
+un marketplace público permanecen fuera del alcance actual. El motor simula;
+no actúa sobre sistemas de producción.
 
 ---
 

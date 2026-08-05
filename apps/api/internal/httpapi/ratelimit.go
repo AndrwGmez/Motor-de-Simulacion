@@ -108,7 +108,7 @@ func (s *Server) rateLimit(name string) gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		key := requestIP(c.Request) + "|" + name
+		key := rateLimitSubject(c) + "|" + name
 		allowed, retry := s.limiter.allow(key, policy)
 		if !allowed {
 			retrySeconds := int(math.Ceil(retry.Seconds()))
@@ -122,6 +122,13 @@ func (s *Server) rateLimit(name string) gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+func rateLimitSubject(c *gin.Context) string {
+	if user := currentUser(c); user.ID != "" {
+		return "user:" + user.ID
+	}
+	return "ip:" + requestIP(c.Request)
 }
 
 func requestIP(request *http.Request) string {

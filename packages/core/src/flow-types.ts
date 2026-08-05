@@ -122,6 +122,22 @@ export interface EditableFlow {
   runHistory?: RunSummary[];
 }
 
+/** Metadatos de una publicación inmutable de un flujo. */
+export interface FlowVersion {
+  id: string;
+  flowId: string;
+  number: number;
+  checksum: string;
+  publishedAt: string;
+  publishedBy: string;
+}
+
+/** Una versión publicada junto con la definición exacta que conserva. */
+export interface FlowVersionSnapshot {
+  version: FlowVersion;
+  definition: FlowDefinition;
+}
+
 export interface ValidationIssue {
   id: string;
   code: string;
@@ -160,6 +176,12 @@ export interface RunEvent {
     edgeId?: string;
     error?: string;
     output?: unknown;
+    /**
+     * Los eventos productivos incluyen metadatos tipados por evento
+     * (tokenId, forkId, code, durationMs, ...). Mantener el índice abierto
+     * evita que el consumidor local reduzca la traza canónica del motor Go.
+     */
+    [key: string]: unknown;
   };
 }
 
@@ -183,6 +205,14 @@ export interface SimulationPlan {
   runId: string;
   events: RunEvent[];
   summary: RunSummary;
+  /** Estado final determinista del contexto, equivalente a SimulationResult.Output. */
+  output?: Record<string, unknown>;
+  /** Primer error causal de la ejecución, cuando el estado es failed. */
+  error?: string;
+  /** Ruta completa; a diferencia del resumen conserva visitas repetidas. */
+  visitedPath?: string[];
+  edgeCounts?: Record<string, number>;
+  nodeTimesMs?: Record<string, number>;
 }
 
 export const NODE_PRESENTATION: Record<

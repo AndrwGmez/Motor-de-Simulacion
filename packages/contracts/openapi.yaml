@@ -19,6 +19,9 @@ tags:
   - name: Parsing
   - name: Runs
   - name: Shares
+  - name: Copilot
+  - name: Organizations
+  - name: Enterprise
 
 security:
   - cookieAuth: []
@@ -380,6 +383,47 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationFailed"
 
+  /v1/flows/{flowId}/draft/restore:
+    parameters:
+      - $ref: "#/components/parameters/FlowId"
+    post:
+      tags: [Versions]
+      operationId: restoreFlowDraft
+      summary: Restaura una versión publicada como nuevo borrador activo.
+      description: |
+        Copia la definición inmutable indicada, normaliza el documento y
+        actualiza también el nombre y la descripción del flujo. La versión
+        debe pertenecer al mismo flujo. `If-Match` protege cambios concurrentes.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RestoreFlowDraftRequest"
+      responses:
+        "200":
+          description: Versión restaurada como borrador editable.
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+            X-Draft-Revision:
+              $ref: "#/components/headers/DraftRevision"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RestoreFlowDraftResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
+        "428":
+          $ref: "#/components/responses/PreconditionRequired"
+
   /v1/flows/{flowId}/versions:
     parameters:
       - $ref: "#/components/parameters/FlowId"
@@ -396,6 +440,86 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/FlowVersion"
+
+  /v1/flows/{flowId}/diff:
+    parameters:
+      - $ref: "#/components/parameters/FlowId"
+    get:
+      tags: [Versions]
+      operationId: diffFlowRevisions
+      summary: Compara semánticamente dos revisiones de un flujo.
+      description: |
+        Un selector omitido representa el borrador actual. Debe indicarse al
+        menos una versión; esto permite versión→draft, draft→versión o
+        versión→versión. El orden de nodos, conexiones y variables no genera
+        ruido, y cada cambio se clasifica como visual, behavioral o breaking.
+      parameters:
+        - name: baseVersionId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: targetVersionId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Diff determinista entre las dos revisiones.
+          content:
+            application/json:
+              schema:
+                $ref: "./schemas/flow-diff.schema.json"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /v1/flows/{flowId}/copilot:
+    parameters:
+      - $ref: "#/components/parameters/FlowId"
+    post:
+      tags: [Copilot]
+      operationId: adviseFlowWithEvidence
+      summary: Recomienda mejoras citando evidencia verificable del flujo.
+      description: |
+        Construye localmente un paquete minimizado con validación, análisis,
+        estructura y, opcionalmente, diff semántico e incidente. Los valores
+        de configuración, inputs, outputs y payloads de eventos no se envían
+        al proveedor. El servidor descarta toda sugerencia cuyas citas o
+        acciones no puedan resolverse contra ese paquete.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EvidenceCopilotRequest"
+      responses:
+        "200":
+          description: Recomendaciones y evidencia resoluble utilizada.
+          content:
+            application/json:
+              schema:
+                $ref: "./schemas/evidence-copilot.schema.json"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/UpstreamFailed"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   /v1/flows/{flowId}/publish:
     parameters:
@@ -647,6 +771,27 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /v1/runs/{runId}/incident:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+    get:
+      tags: [Runs]
+      operationId: getRunIncidentTimeMachine
+      summary: Reconstruye una línea de tiempo reproducible de la ejecución.
+      description: |
+        Ordena los eventos, detecta huecos o duplicados, resume la ruta y
+        señala la primera causa raíz. El traceId permite correlacionar la
+        ejecución con las trazas OpenTelemetry sin exponer datos públicamente.
+      responses:
+        "200":
+          description: Informe del Incident Time Machine.
+          content:
+            application/json:
+              schema:
+                $ref: "./schemas/incident-report.schema.json"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /v1/runs/{runId}/events:
     parameters:
       - $ref: "#/components/parameters/RunId"
@@ -845,6 +990,505 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /v1/organizations:
+    get:
+      tags: [Organizations]
+      operationId: listOrganizations
+      summary: Lista las organizaciones donde el usuario tiene membresía activa.
+      responses:
+        "200":
+          description: Organizaciones visibles.
+          content:
+            application/json:
+              schema:
+                $ref: "./schemas/enterprise.schema.json#/$defs/OrganizationList"
+    post:
+      tags: [Organizations]
+      operationId: createOrganization
+      summary: Crea una organización y asigna al usuario actual como owner activo.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "./schemas/enterprise.schema.json#/$defs/OrganizationCreate"
+      responses:
+        "201":
+          description: Organización creada y auditada atómicamente.
+          content:
+            application/json:
+              schema:
+                $ref: "./schemas/enterprise.schema.json#/$defs/Organization"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/organizations/{organizationId}:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      tags: [Organizations]
+      operationId: getOrganization
+      summary: Obtiene una organización visible para un miembro activo.
+      responses:
+        "200":
+          description: Organización.
+          content:
+            application/json:
+              schema:
+                $ref: "./schemas/enterprise.schema.json#/$defs/Organization"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/organizations/{organizationId}/members:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      tags: [Organizations]
+      operationId: listOrganizationMembers
+      summary: Lista miembros; disponible para owner, admin y auditor activos.
+      responses:
+        "200":
+          description: Miembros de la organización.
+          content:
+            application/json:
+              schema:
+                $ref: "./schemas/enterprise.schema.json#/$defs/OrganizationMemberList"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [Organizations]
+      operationId: setOrganizationMember
+      summary: Crea o actualiza por email una membresía registrada.
+      description: Un admin no puede asignar ni modificar owners; el último owner activo nunca puede ser degradado o suspendido.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "./schemas/enterprise.schema.json#/$defs/OrganizationMemberSet"
+      responses:
+        "200":
+          description: Membresía actualizada.
+          content:
+            application/json:
+              schema:
+                $ref: "./schemas/enterprise.schema.json#/$defs/OrganizationMemberView"
+        "201":
+          description: Membresía creada.
+          content:
+            application/json:
+              schema:
+                $ref: "./schemas/enterprise.schema.json#/$defs/OrganizationMemberView"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /v1/organizations/{organizationId}/sso-connections:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      tags: [Enterprise]
+      operationId: listOrganizationSsoConnections
+      summary: Lista metadatos públicos SSO; nunca retorna secretos.
+      responses:
+        "200":
+          description: Conexiones SSO.
+          content:
+            application/json:
+              schema:
+                $ref: "./schemas/enterprise.schema.json#/$defs/SSOConnectionList"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [Enterprise]
+      operationId: createOrganizationSsoConnection
+      summary: Registra metadatos OIDC o SAML.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "./schemas/enterprise.schema.json#/$defs/SSOConnectionInput"
+      responses:
+        "201":
+          description: Conexión creada.
+          content:
+            application/json:
+              schema:
+                $ref: "./schemas/enterprise.schema.json#/$defs/SSOConnection"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /v1/organizations/{organizationId}/sso-connections/{connectionId}:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/ConnectionId"
+    get:
+      tags: [Enterprise]
+      operationId: getOrganizationSsoConnection
+      summary: Obtiene metadatos públicos de una conexión SSO.
+      responses:
+        "200":
+          description: Conexión SSO.
+          content:
+            application/json:
+              schema:
+                $ref: "./schemas/enterprise.schema.json#/$defs/SSOConnection"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Enterprise]
+      operationId: updateOrganizationSsoConnection
+      summary: Reemplaza los metadatos públicos de una conexión SSO.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "./schemas/enterprise.schema.json#/$defs/SSOConnectionInput"
+      responses:
+        "200":
+          description: Conexión actualizada.
+          content:
+            application/json:
+              schema:
+                $ref: "./schemas/enterprise.schema.json#/$defs/SSOConnection"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /v1/organizations/{organizationId}/policy-rules:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      tags: [Enterprise]
+      operationId: listOrganizationPolicyRules
+      summary: Lista reglas para owner, admin y auditor activos.
+      responses:
+        "200":
+          description: Reglas deterministas de la organización.
+          content:
+            application/json:
+              schema:
+                $ref: "./schemas/enterprise.schema.json#/$defs/PolicyRuleList"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [Enterprise]
+      operationId: createOrganizationPolicyRule
+      summary: Crea una regla de allow o deny con globs seguros.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "./schemas/enterprise.schema.json#/$defs/PolicyRuleInput"
+      responses:
+        "201":
+          description: Regla creada.
+          content:
+            application/json:
+              schema:
+                $ref: "./schemas/enterprise.schema.json#/$defs/PolicyRule"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /v1/organizations/{organizationId}/policy-rules/{ruleId}:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/RuleId"
+    get:
+      tags: [Enterprise]
+      operationId: getOrganizationPolicyRule
+      summary: Obtiene una regla de política.
+      responses:
+        "200":
+          description: Regla.
+          content:
+            application/json:
+              schema:
+                $ref: "./schemas/enterprise.schema.json#/$defs/PolicyRule"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Enterprise]
+      operationId: updateOrganizationPolicyRule
+      summary: Reemplaza una regla de política.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "./schemas/enterprise.schema.json#/$defs/PolicyRuleInput"
+      responses:
+        "200":
+          description: Regla actualizada.
+          content:
+            application/json:
+              schema:
+                $ref: "./schemas/enterprise.schema.json#/$defs/PolicyRule"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+    delete:
+      tags: [Enterprise]
+      operationId: deleteOrganizationPolicyRule
+      summary: Elimina una regla de política.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Regla eliminada y operación auditada.
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /v1/organizations/{organizationId}/policy/evaluate:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    post:
+      tags: [Enterprise]
+      operationId: evaluateOrganizationPolicy
+      summary: Evalúa una acción con deny por defecto y precedencia explícita de deny.
+      description: El rol nunca se acepta del cliente; se deriva de la membresía activa autenticada. La respuesta se entrega solamente después de persistir su auditoría.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "./schemas/enterprise.schema.json#/$defs/PolicyEvaluationInput"
+      responses:
+        "200":
+          description: Decisión explicable y auditada.
+          content:
+            application/json:
+              schema:
+                $ref: "./schemas/enterprise.schema.json#/$defs/PolicyDecision"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/organizations/{organizationId}/plugins:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      tags: [Enterprise]
+      operationId: listOrganizationPlugins
+      summary: Lista plugins registrados para cualquier miembro activo.
+      responses:
+        "200":
+          description: Plugins de la organización.
+          content:
+            application/json:
+              schema:
+                $ref: "./schemas/enterprise.schema.json#/$defs/PluginRegistrationList"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [Enterprise]
+      operationId: registerOrganizationPlugin
+      summary: Registra un artefacto verificable por checksum.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "./schemas/enterprise.schema.json#/$defs/PluginRegistrationInput"
+      responses:
+        "201":
+          description: Plugin registrado.
+          content:
+            application/json:
+              schema:
+                $ref: "./schemas/enterprise.schema.json#/$defs/PluginRegistration"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /v1/organizations/{organizationId}/plugins/{registrationId}:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/RegistrationId"
+    get:
+      tags: [Enterprise]
+      operationId: getOrganizationPlugin
+      summary: Obtiene un plugin registrado.
+      responses:
+        "200":
+          description: Plugin.
+          content:
+            application/json:
+              schema:
+                $ref: "./schemas/enterprise.schema.json#/$defs/PluginRegistration"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [Enterprise]
+      operationId: setOrganizationPluginStatus
+      summary: Cambia el estado; revoked es terminal e inmutable.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "./schemas/enterprise.schema.json#/$defs/PluginStatusInput"
+      responses:
+        "200":
+          description: Plugin actualizado.
+          content:
+            application/json:
+              schema:
+                $ref: "./schemas/enterprise.schema.json#/$defs/PluginRegistration"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /v1/organizations/{organizationId}/audit:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      tags: [Enterprise]
+      operationId: listOrganizationAudit
+      summary: Lista la cadena append-only con paginación por secuencia.
+      parameters:
+        - $ref: "#/components/parameters/EnterpriseAuditAfterSequence"
+        - $ref: "#/components/parameters/EnterpriseAuditLimit"
+      responses:
+        "200":
+          description: Página estable de auditoría.
+          content:
+            application/json:
+              schema:
+                $ref: "./schemas/enterprise.schema.json#/$defs/AuditEventList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/organizations/{organizationId}/audit/verify:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      tags: [Enterprise]
+      operationId: verifyOrganizationAudit
+      summary: Verifica hashes, secuencias y checkpoint contra truncamiento de cola.
+      responses:
+        "200":
+          description: Resultado de integridad; una cadena inválida también responde 200 con valid=false.
+          content:
+            application/json:
+              schema:
+                $ref: "./schemas/enterprise.schema.json#/$defs/AuditVerification"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/organizations/{organizationId}/projects:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      tags: [Organizations]
+      operationId: listOrganizationProjects
+      summary: Lista proyectos adscritos a la organización.
+      responses:
+        "200":
+          description: Proyectos.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectList"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/organizations/{organizationId}/projects/{projectId}/attach:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/ProjectId"
+    post:
+      tags: [Organizations]
+      operationId: attachProjectToOrganization
+      summary: Adscribe un proyecto sin permitir moverlo entre tenants.
+      description: Requiere owner/admin activo de la organización y rol owner sobre el proyecto.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: Proyecto adscrito.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
 components:
   securitySchemes:
     cookieAuth:
@@ -857,8 +1501,57 @@ components:
       description: Hash fuerte del borrador persistido.
       schema:
         type: string
+    DraftRevision:
+      description: Revisión fuerte del borrador persistido; coincide con ETag.
+      schema:
+        type: string
 
   parameters:
+    OrganizationId:
+      name: organizationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ConnectionId:
+      name: connectionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    RuleId:
+      name: ruleId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    RegistrationId:
+      name: registrationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    EnterpriseAuditAfterSequence:
+      name: afterSequence
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    EnterpriseAuditLimit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 100
     ProjectId:
       name: projectId
       in: path
@@ -944,6 +1637,23 @@ components:
       properties:
         status:
           enum: [ok]
+    EvidenceCopilotRequest:
+      type: object
+      additionalProperties: false
+      required: [question]
+      properties:
+        question:
+          type: string
+          minLength: 3
+          maxLength: 4000
+        baseVersionId:
+          type: string
+          format: uuid
+          description: Añade el diff de esta versión contra el borrador.
+        runId:
+          type: string
+          format: uuid
+          description: Añade un incidente perteneciente al mismo flujo.
     Error:
       type: object
       additionalProperties: false
@@ -1173,6 +1883,23 @@ components:
         publishedBy:
           type: string
           format: uuid
+    RestoreFlowDraftRequest:
+      type: object
+      additionalProperties: false
+      required: [versionId]
+      properties:
+        versionId:
+          type: string
+          format: uuid
+    RestoreFlowDraftResponse:
+      type: object
+      additionalProperties: false
+      required: [definition, restoredFromVersion]
+      properties:
+        definition:
+          $ref: "./schemas/flow-definition.schema.json"
+        restoredFromVersion:
+          $ref: "#/components/schemas/FlowVersion"
     ValidationReport:
       type: object
       additionalProperties: false
@@ -1250,6 +1977,9 @@ components:
         id:
           type: string
           format: uuid
+        traceId:
+          type: string
+          pattern: "^[0-9a-f]{32}$"
         flowVersionId:
           description: UUID de la versión publicada; vacío para un snapshot de borrador.
           oneOf:
@@ -1463,6 +2193,12 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
+    PreconditionRequired:
+      description: La operación requiere el encabezado If-Match.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
     ValidationFailed:
       description: Entrada o grafo inválido.
       content:
@@ -1470,7 +2206,7 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
     PayloadTooLarge:
-      description: El documento supera 1 MB o los límites del grafo.
+      description: El documento supera 24 MiB o los límites del grafo.
       content:
         application/json:
           schema:

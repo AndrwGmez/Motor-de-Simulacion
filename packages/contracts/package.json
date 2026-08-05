@@ -11,6 +11,10 @@
   ],
   "exports": {
     "./flow-definition.schema.json": "./schemas/flow-definition.schema.json",
+    "./flow-diff.schema.json": "./schemas/flow-diff.schema.json",
+    "./evidence-copilot.schema.json": "./schemas/evidence-copilot.schema.json",
+    "./incident-report.schema.json": "./schemas/incident-report.schema.json",
+    "./enterprise.schema.json": "./schemas/enterprise.schema.json",
     "./run-event.schema.json": "./schemas/run-event.schema.json",
     "./simulation-request.schema.json": "./schemas/simulation-request.schema.json",
     "./parse-proposal.schema.json": "./schemas/parse-proposal.schema.json",
@@ -30,4 +34,3 @@
     "yaml": "^2.8.1"
   }
 }
-

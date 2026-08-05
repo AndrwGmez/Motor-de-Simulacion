@@ -283,7 +283,7 @@ func (p *Postgres) CreateVersion(ctx context.Context, version domain.FlowVersion
 
 func (p *Postgres) ListVersions(ctx context.Context, flowID string) ([]domain.FlowVersion, error) {
 	rows, err := p.pool.Query(ctx, `SELECT id,flow_id,version_number,definition,checksum,created_at,published_by
-		FROM flow_versions WHERE flow_id=$1 ORDER BY version_number`, flowID)
+		FROM flow_versions WHERE flow_id=$1 ORDER BY version_number DESC`, flowID)
 	if err != nil {
 		return nil, translate(err)
 	}
@@ -313,6 +313,90 @@ func scanVersion(row rowScanner) (domain.FlowVersion, error) {
 	return version, json.Unmarshal(raw, &version.Definition)
 }
 
+func marshalRunPayload(run domain.Run) ([]byte, error) {
+	// Events and node visits have dedicated ordered tables. Keeping them out of
+	// the JSON snapshot makes the payload size independent from replay length.
+	run.Events = nil
+	run.NodeRuns = nil
+	return json.Marshal(run)
+}
+
+func marshalOptionalJSON(value any) ([]byte, error) {
+	if value == nil {
+		return nil, nil
+	}
+	return json.Marshal(value)
+}
+
+func decodeRun(
+	raw []byte,
+	status string,
+	startedAt, completedAt *time.Time,
+	outputRaw []byte,
+	runError string,
+	eventsRaw, nodeRunsRaw []byte,
+) (domain.Run, error) {
+	var run domain.Run
+	if err := json.Unmarshal(raw, &run); err != nil {
+		return domain.Run{}, err
+	}
+	run.Status = status
+	if startedAt != nil {
+		run.StartedAt = startedAt
+	}
+	if completedAt != nil {
+		run.CompletedAt = completedAt
+	}
+	if len(outputRaw) > 0 {
+		if err := json.Unmarshal(outputRaw, &run.Output); err != nil {
+			return domain.Run{}, err
+		}
+	}
+	if runError != "" {
+		run.Error = runError
+	}
+	legacyEvents, legacyNodeRuns := run.Events, run.NodeRuns
+	var events []domain.Event
+	if err := json.Unmarshal(eventsRaw, &events); err != nil {
+		return domain.Run{}, err
+	}
+	var nodeRuns []domain.NodeRun
+	if err := json.Unmarshal(nodeRunsRaw, &nodeRuns); err != nil {
+		return domain.Run{}, err
+	}
+	run.Events = mergeRunEvents(legacyEvents, events)
+	if len(nodeRuns) > 0 || len(legacyNodeRuns) == 0 {
+		run.NodeRuns = nodeRuns
+	} else {
+		run.NodeRuns = legacyNodeRuns
+	}
+	return run, nil
+}
+
+func mergeRunEvents(legacy, normalized []domain.Event) []domain.Event {
+	if len(legacy) == 0 {
+		return normalized
+	}
+	if len(normalized) == 0 {
+		return legacy
+	}
+	bySequence := make(map[int64]domain.Event, len(legacy)+len(normalized))
+	for _, event := range legacy {
+		bySequence[event.Sequence] = event
+	}
+	// The normalized table is authoritative when both representations contain
+	// the same sequence during a rolling upgrade from the legacy payload.
+	for _, event := range normalized {
+		bySequence[event.Sequence] = event
+	}
+	merged := make([]domain.Event, 0, len(bySequence))
+	for _, event := range bySequence {
+		merged = append(merged, event)
+	}
+	sort.Slice(merged, func(i, j int) bool { return merged[i].Sequence < merged[j].Sequence })
+	return merged
+}
+
 func (p *Postgres) CreateRun(ctx context.Context, run domain.Run, idempotency RunIdempotency) (domain.Run, bool, error) {
 	if idempotency.Key != "" {
 		existing, found, err := p.resolveRunIdempotency(ctx, idempotency)
@@ -323,7 +407,11 @@ func (p *Postgres) CreateRun(ctx context.Context, run domain.Run, idempotency Ru
 			return existing, false, nil
 		}
 	}
-	raw, err := json.Marshal(run)
+	raw, err := marshalRunPayload(run)
+	if err != nil {
+		return domain.Run{}, false, err
+	}
+	outputRaw, err := marshalOptionalJSON(run.Output)
 	if err != nil {
 		return domain.Run{}, false, err
 	}
@@ -341,10 +429,32 @@ func (p *Postgres) CreateRun(ctx context.Context, run domain.Run, idempotency Ru
 			return domain.Run{}, false, translate(err)
 		}
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO runs(id,project_id,flow_id,version_id,status,payload,created_at)
-		VALUES($1,$2,$3,NULLIF($4::text,'')::uuid,$5,$6,$7)`,
-		run.ID, run.ProjectID, run.FlowID, run.VersionID, run.Status, raw, run.CreatedAt); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO runs(
+		id,project_id,flow_id,version_id,status,payload,started_at,completed_at,output,error,created_at
+	) VALUES($1,$2,$3,NULLIF($4::text,'')::uuid,$5,$6,$7,$8,$9,$10,$11)`,
+		run.ID, run.ProjectID, run.FlowID, run.VersionID, run.Status, raw,
+		run.StartedAt, run.CompletedAt, outputRaw, run.Error, run.CreatedAt); err != nil {
 		return domain.Run{}, false, translate(err)
+	}
+	for _, event := range run.Events {
+		eventRaw, marshalErr := json.Marshal(event)
+		if marshalErr != nil {
+			return domain.Run{}, false, marshalErr
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO run_events(run_id,sequence,event,occurred_at) VALUES($1,$2,$3,$4)`,
+			run.ID, event.Sequence, eventRaw, event.OccurredAt); err != nil {
+			return domain.Run{}, false, translate(err)
+		}
+	}
+	for index, nodeRun := range run.NodeRuns {
+		nodeRaw, marshalErr := json.Marshal(nodeRun)
+		if marshalErr != nil {
+			return domain.Run{}, false, marshalErr
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO node_runs(run_id,ordinal,node_run) VALUES($1,$2,$3)`,
+			run.ID, index, nodeRaw); err != nil {
+			return domain.Run{}, false, translate(err)
+		}
 	}
 	if idempotency.Key != "" {
 		_, err = tx.Exec(ctx, `INSERT INTO run_idempotency_keys(
@@ -376,14 +486,14 @@ func (p *Postgres) CreateRun(ctx context.Context, run domain.Run, idempotency Ru
 
 func (p *Postgres) resolveRunIdempotency(ctx context.Context, idempotency RunIdempotency) (domain.Run, bool, error) {
 	var requestHash string
-	var raw []byte
-	err := p.pool.QueryRow(ctx, `SELECT i.request_hash,r.payload
+	var runID string
+	err := p.pool.QueryRow(ctx, `SELECT i.request_hash,r.id
 		FROM run_idempotency_keys i
 		JOIN runs r ON r.id=i.run_id
 		WHERE i.user_id=$1 AND i.target_type=$2 AND i.target_id=$3
 		  AND i.target_revision=$4 AND i.idempotency_key=$5 AND i.expires_at > now()`,
 		idempotency.UserID, idempotency.TargetType, idempotency.TargetID,
-		idempotency.TargetRevision, idempotency.Key).Scan(&requestHash, &raw)
+		idempotency.TargetRevision, idempotency.Key).Scan(&requestHash, &runID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Run{}, false, nil
 	}
@@ -393,25 +503,35 @@ func (p *Postgres) resolveRunIdempotency(ctx context.Context, idempotency RunIde
 	if requestHash != idempotency.RequestHash {
 		return domain.Run{}, false, ErrIdempotencyMismatch
 	}
-	var run domain.Run
-	if err := json.Unmarshal(raw, &run); err != nil {
+	run, err := p.RunByID(ctx, runID)
+	if err != nil {
 		return domain.Run{}, false, err
 	}
 	return run, true, nil
 }
 
 func (p *Postgres) RunByID(ctx context.Context, id string) (domain.Run, error) {
-	var raw []byte
-	err := p.pool.QueryRow(ctx, `SELECT payload FROM runs WHERE id=$1`, id).Scan(&raw)
+	var raw, outputRaw, eventsRaw, nodeRunsRaw []byte
+	var status, runError string
+	var startedAt, completedAt *time.Time
+	err := p.pool.QueryRow(ctx, `SELECT r.payload,r.status,r.started_at,r.completed_at,r.output,r.error,
+		COALESCE((SELECT jsonb_agg(e.event ORDER BY e.sequence) FROM run_events e WHERE e.run_id=r.id),'[]'::jsonb),
+		COALESCE((SELECT jsonb_agg(n.node_run ORDER BY n.ordinal) FROM node_runs n WHERE n.run_id=r.id),'[]'::jsonb)
+		FROM runs r WHERE r.id=$1`, id).Scan(
+		&raw, &status, &startedAt, &completedAt, &outputRaw, &runError, &eventsRaw, &nodeRunsRaw,
+	)
 	if err != nil {
 		return domain.Run{}, translate(err)
 	}
-	var run domain.Run
-	return run, json.Unmarshal(raw, &run)
+	return decodeRun(raw, status, startedAt, completedAt, outputRaw, runError, eventsRaw, nodeRunsRaw)
 }
 
 func (p *Postgres) UpdateRun(ctx context.Context, run domain.Run) error {
-	raw, err := json.Marshal(run)
+	raw, err := marshalRunPayload(run)
+	if err != nil {
+		return err
+	}
+	outputRaw, err := marshalOptionalJSON(run.Output)
 	if err != nil {
 		return err
 	}
@@ -420,26 +540,101 @@ func (p *Postgres) UpdateRun(ctx context.Context, run domain.Run) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	tag, err := tx.Exec(ctx, `UPDATE runs SET status=$2,payload=$3,updated_at=now() WHERE id=$1`, run.ID, run.Status, raw)
+	tag, err := tx.Exec(ctx, `UPDATE runs SET
+		status=$2,payload=$3,started_at=$4,completed_at=$5,output=$6,error=$7,updated_at=now()
+		WHERE id=$1`, run.ID, run.Status, raw, run.StartedAt, run.CompletedAt, outputRaw, run.Error)
 	if err != nil {
 		return translate(err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
+	if _, err = tx.Exec(ctx, `DELETE FROM run_events WHERE run_id=$1`, run.ID); err != nil {
+		return translate(err)
+	}
 	for _, event := range run.Events {
 		eventRaw, marshalErr := json.Marshal(event)
 		if marshalErr != nil {
 			return marshalErr
 		}
-		if _, err = tx.Exec(ctx, `INSERT INTO run_events(run_id,sequence,event,occurred_at) VALUES($1,$2,$3,$4)
-			ON CONFLICT(run_id,sequence) DO NOTHING`, run.ID, event.Sequence, eventRaw, event.OccurredAt); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO run_events(run_id,sequence,event,occurred_at) VALUES($1,$2,$3,$4)`,
+			run.ID, event.Sequence, eventRaw, event.OccurredAt); err != nil {
 			return translate(err)
 		}
 	}
+	if _, err = tx.Exec(ctx, `DELETE FROM node_runs WHERE run_id=$1`, run.ID); err != nil {
+		return translate(err)
+	}
+	if len(run.NodeRuns) > 0 {
+		for index, nodeRun := range run.NodeRuns {
+			nodeRaw, marshalErr := json.Marshal(nodeRun)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			if _, err = tx.Exec(ctx, `INSERT INTO node_runs(run_id,ordinal,node_run) VALUES($1,$2,$3)`, run.ID, index, nodeRaw); err != nil {
+				return translate(err)
+			}
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+// AppendRunEvent updates only the mutable run fields and inserts one event.
+// Event history and node visits live in their normalized tables, so playback
+// no longer serializes and reinserts the full history after every step.
+func (p *Postgres) AppendRunEvent(ctx context.Context, run domain.Run, event domain.Event) error {
+	outputRaw, err := marshalOptionalJSON(run.Output)
+	if err != nil {
+		return err
+	}
+	eventRaw, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var currentStatus string
+	var legacyMaxSequence int64
+	if err := tx.QueryRow(ctx, `SELECT status,COALESCE((
+		SELECT MAX((legacy_event->>'sequence')::bigint)
+		FROM jsonb_array_elements(CASE
+			WHEN jsonb_typeof(payload->'events')='array' THEN payload->'events'
+			ELSE '[]'::jsonb
+		END) AS legacy_event
+	),0)
+		FROM runs WHERE id=$1 FOR UPDATE`, run.ID).Scan(&currentStatus, &legacyMaxSequence); err != nil {
+		return translate(err)
+	}
+	if !activeRunStatus(currentStatus) {
+		return ErrConflict
+	}
+	var normalizedMaxSequence int64
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(sequence),0) FROM run_events WHERE run_id=$1`, run.ID).Scan(&normalizedMaxSequence); err != nil {
+		return translate(err)
+	}
+	if normalizedMaxSequence > legacyMaxSequence {
+		legacyMaxSequence = normalizedMaxSequence
+	}
+	expectedSequence := legacyMaxSequence + 1
+	if event.Sequence != expectedSequence {
+		return ErrConflict
+	}
+	_, err = tx.Exec(ctx, `UPDATE runs SET
+		status=$2,started_at=$3,completed_at=$4,output=$5,error=$6,updated_at=now()
+		WHERE id=$1`, run.ID, run.Status, run.StartedAt, run.CompletedAt, outputRaw, run.Error)
+	if err != nil {
+		return translate(err)
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO run_events(run_id,sequence,event,occurred_at)
+		VALUES($1,$2,$3,$4)`, run.ID, event.Sequence, eventRaw, event.OccurredAt); err != nil {
+		return translate(err)
+	}
 	if len(run.NodeRuns) > 0 {
 		if _, err = tx.Exec(ctx, `DELETE FROM node_runs WHERE run_id=$1`, run.ID); err != nil {
-			return err
+			return translate(err)
 		}
 		for index, nodeRun := range run.NodeRuns {
 			nodeRaw, marshalErr := json.Marshal(nodeRun)
@@ -455,20 +650,29 @@ func (p *Postgres) UpdateRun(ctx context.Context, run domain.Run) error {
 }
 
 func (p *Postgres) ListRuns(ctx context.Context, flowID string) ([]domain.Run, error) {
-	rows, err := p.pool.Query(ctx, `SELECT payload FROM runs WHERE flow_id=$1 ORDER BY created_at DESC`, flowID)
+	rows, err := p.pool.Query(ctx, `SELECT r.payload,r.status,r.started_at,r.completed_at,r.output,r.error,
+		COALESCE((SELECT jsonb_agg(e.event ORDER BY e.sequence) FROM run_events e WHERE e.run_id=r.id),'[]'::jsonb),
+		COALESCE((SELECT jsonb_agg(n.node_run ORDER BY n.ordinal) FROM node_runs n WHERE n.run_id=r.id),'[]'::jsonb)
+		FROM runs r WHERE r.flow_id=$1 ORDER BY r.created_at DESC`, flowID)
 	if err != nil {
 		return nil, translate(err)
 	}
 	defer rows.Close()
 	result := []domain.Run{}
 	for rows.Next() {
-		var raw []byte
-		if err := rows.Scan(&raw); err != nil {
+		var raw, outputRaw, eventsRaw, nodeRunsRaw []byte
+		var status, runError string
+		var startedAt, completedAt *time.Time
+		if err := rows.Scan(
+			&raw, &status, &startedAt, &completedAt, &outputRaw, &runError, &eventsRaw, &nodeRunsRaw,
+		); err != nil {
 			return nil, err
 		}
-		var run domain.Run
-		if err := json.Unmarshal(raw, &run); err != nil {
-			return nil, err
+		run, decodeErr := decodeRun(
+			raw, status, startedAt, completedAt, outputRaw, runError, eventsRaw, nodeRunsRaw,
+		)
+		if decodeErr != nil {
+			return nil, decodeErr
 		}
 		result = append(result, run)
 	}
@@ -514,26 +718,35 @@ func (p *Postgres) InterruptActiveRuns(ctx context.Context, occurredAt time.Time
 			return 0, fmt.Errorf("decode active run %s: %w", item.id, err)
 		}
 		run.ID, run.Status = item.id, item.status
+		var lastEventRaw []byte
+		lastEventErr := tx.QueryRow(ctx, `SELECT event FROM run_events WHERE run_id=$1 ORDER BY sequence DESC LIMIT 1`, run.ID).Scan(&lastEventRaw)
+		if lastEventErr == nil {
+			var lastEvent domain.Event
+			if err := json.Unmarshal(lastEventRaw, &lastEvent); err != nil {
+				return 0, fmt.Errorf("decode last event for active run %s: %w", item.id, err)
+			}
+			lastPayloadSequence := int64(0)
+			for _, candidate := range run.Events {
+				if candidate.Sequence > lastPayloadSequence {
+					lastPayloadSequence = candidate.Sequence
+				}
+			}
+			if lastEvent.Sequence > lastPayloadSequence {
+				run.Events = append(run.Events, lastEvent)
+			}
+		} else if !errors.Is(lastEventErr, pgx.ErrNoRows) {
+			return 0, translate(lastEventErr)
+		}
 		run = interruptRun(run, occurredAt)
-		var persistedSequence int64
-		if err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(sequence),0) FROM run_events WHERE run_id=$1`, run.ID).Scan(&persistedSequence); err != nil {
-			return 0, translate(err)
-		}
 		event := &run.Events[len(run.Events)-1]
-		if event.Sequence <= persistedSequence {
-			event.Sequence = persistedSequence + 1
-		}
-		runRaw, err := json.Marshal(run)
-		if err != nil {
-			return 0, err
-		}
 		eventRaw, err := json.Marshal(event)
 		if err != nil {
 			return 0, err
 		}
-		tag, err := tx.Exec(ctx, `UPDATE runs SET status='interrupted',payload=$2,updated_at=now()
-			WHERE id=$1 AND status = ANY($3::text[])`,
-			run.ID, runRaw, []string{"created", "queued", "running", "paused", "waiting"})
+		tag, err := tx.Exec(ctx, `UPDATE runs
+			SET status='interrupted',completed_at=$2,error=$3,updated_at=now()
+			WHERE id=$1 AND status = ANY($4::text[])`,
+			run.ID, run.CompletedAt, run.Error, []string{"created", "queued", "running", "paused", "waiting"})
 		if err != nil {
 			return 0, translate(err)
 		}
@@ -550,6 +763,516 @@ func (p *Postgres) InterruptActiveRuns(ctx context.Context, occurredAt time.Time
 		return 0, err
 	}
 	return interruptedCount, nil
+}
+
+func (p *Postgres) AcquireRunLease(
+	ctx context.Context,
+	request RunLeaseRequest,
+	limits RunCapacityLimits,
+) (RunLease, error) {
+	if err := validateLeaseRequest(request); err != nil {
+		return RunLease{}, err
+	}
+	if limits.Global < 0 || limits.Actor < 0 || limits.Project < 0 {
+		return RunLease{}, fmt.Errorf("run capacity limits cannot be negative")
+	}
+	request.Now = request.Now.UTC()
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return RunLease{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	var projectID, status string
+	if err := tx.QueryRow(ctx, `SELECT project_id,status FROM runs WHERE id=$1 FOR UPDATE`, request.RunID).
+		Scan(&projectID, &status); err != nil {
+		return RunLease{}, translate(err)
+	}
+	if !activeRunStatus(status) {
+		return RunLease{}, ErrConflict
+	}
+	if err := p.lockQuotaScope(ctx, tx, "run-quota-global"); err != nil {
+		return RunLease{}, err
+	}
+	if request.ActorID != "" {
+		if err := p.lockQuotaScope(ctx, tx, "run-quota-actor:"+request.ActorID); err != nil {
+			return RunLease{}, err
+		}
+	}
+	if projectID != "" {
+		if err := p.lockQuotaScope(ctx, tx, "run-quota-project:"+projectID); err != nil {
+			return RunLease{}, err
+		}
+	}
+
+	var existing RunLease
+	lease, found, err := p.runLeaseByID(ctx, tx, request.RunID)
+	if err != nil {
+		return RunLease{}, err
+	}
+	if found {
+		existing = lease
+		if activeLease(existing, request.Now) {
+			if existing.InstanceID != request.InstanceID {
+				return RunLease{}, &RunLeaseHeldError{RetryAfter: normalizedRetryAfter(existing.ExpiresAt.Sub(request.Now))}
+			}
+			existing.HeartbeatAt = request.Now
+			existing.ExpiresAt = request.Now.Add(request.TTL)
+			if _, err := tx.Exec(ctx, `UPDATE run_leases
+				SET heartbeat_at=$3,expires_at=$4,released_at=NULL
+				WHERE run_id=$1 AND instance_id=$2`,
+				request.RunID, request.InstanceID, existing.HeartbeatAt, existing.ExpiresAt); err != nil {
+				return RunLease{}, translate(err)
+			}
+			return existing, tx.Commit(ctx)
+		}
+	}
+
+	if hit, retry := p.runQuotaExceeded(ctx, tx, request.RunID, request.ActorID, projectID, limits, request.Now); hit {
+		return RunLease{}, &RunQuotaError{Scope: retry.scope, RetryAfter: retry.retryAfter}
+	}
+
+	lease = RunLease{
+		RunID: request.RunID, InstanceID: request.InstanceID,
+		ActorID: request.ActorID, ProjectID: projectID,
+		AcquiredAt: request.Now, HeartbeatAt: request.Now, ExpiresAt: request.Now.Add(request.TTL),
+	}
+	if found {
+		_, err = tx.Exec(ctx, `UPDATE run_leases
+			SET instance_id=$2,actor_id=$3,project_id=$4,acquired_at=$5,heartbeat_at=$6,expires_at=$7,released_at=NULL
+			WHERE run_id=$1`,
+			lease.RunID, lease.InstanceID, lease.ActorID, lease.ProjectID, lease.AcquiredAt, lease.HeartbeatAt, lease.ExpiresAt)
+	} else {
+		_, err = tx.Exec(ctx, `INSERT INTO run_leases(
+			run_id,instance_id,actor_id,project_id,acquired_at,heartbeat_at,expires_at,released_at
+		) VALUES($1,$2,$3,$4,$5,$6,$7,NULL)`,
+			lease.RunID, lease.InstanceID, lease.ActorID, lease.ProjectID, lease.AcquiredAt, lease.HeartbeatAt, lease.ExpiresAt)
+	}
+	if err != nil {
+		return RunLease{}, translate(err)
+	}
+	return lease, tx.Commit(ctx)
+}
+
+func (p *Postgres) HeartbeatRunLease(ctx context.Context, request RunLeaseRequest) (RunLease, error) {
+	if err := validateLeaseRequest(request); err != nil {
+		return RunLease{}, err
+	}
+	request.Now = request.Now.UTC()
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return RunLease{}, err
+	}
+	defer tx.Rollback(ctx)
+	var status string
+	if err := tx.QueryRow(ctx, `SELECT status FROM runs WHERE id=$1 FOR UPDATE`, request.RunID).Scan(&status); err != nil {
+		return RunLease{}, translate(err)
+	}
+	if !activeRunStatus(status) {
+		return RunLease{}, ErrRunLeaseLost
+	}
+	lease, found, err := p.runLeaseByID(ctx, tx, request.RunID)
+	if err != nil {
+		return RunLease{}, err
+	}
+	if !found || lease.InstanceID != request.InstanceID || !activeLease(lease, request.Now) {
+		return RunLease{}, ErrRunLeaseLost
+	}
+	lease.HeartbeatAt = request.Now
+	lease.ExpiresAt = request.Now.Add(request.TTL)
+	tag, err := tx.Exec(ctx, `UPDATE run_leases
+		SET heartbeat_at=$3,expires_at=$4
+		WHERE run_id=$1 AND instance_id=$2 AND released_at IS NULL`,
+		request.RunID, request.InstanceID, lease.HeartbeatAt, lease.ExpiresAt)
+	if err != nil {
+		return RunLease{}, translate(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return RunLease{}, ErrRunLeaseLost
+	}
+	return lease, tx.Commit(ctx)
+}
+
+func (p *Postgres) ReleaseRunLease(ctx context.Context, runID, instanceID string, releasedAt time.Time) error {
+	if runID == "" || instanceID == "" || releasedAt.IsZero() {
+		return fmt.Errorf("run id, instance id, and release time are required")
+	}
+	releasedAt = releasedAt.UTC()
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	lease, found, err := p.runLeaseByID(ctx, tx, runID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return ErrNotFound
+	}
+	if lease.InstanceID != instanceID {
+		return ErrRunLeaseLost
+	}
+	if lease.ReleasedAt != nil {
+		return tx.Commit(ctx)
+	}
+	tag, err := tx.Exec(ctx, `UPDATE run_leases
+		SET released_at=$3,expires_at=$3
+		WHERE run_id=$1 AND instance_id=$2 AND released_at IS NULL`,
+		runID, instanceID, releasedAt)
+	if err != nil {
+		return translate(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrRunLeaseLost
+	}
+	return tx.Commit(ctx)
+}
+
+func (p *Postgres) InterruptExpiredRunLeases(ctx context.Context, occurredAt time.Time) (int, error) {
+	if occurredAt.IsZero() {
+		occurredAt = time.Now().UTC()
+	} else {
+		occurredAt = occurredAt.UTC()
+	}
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+	rows, err := tx.Query(ctx, `SELECT
+		r.id,r.payload,r.status,r.started_at,r.completed_at,r.output,r.error,
+		COALESCE((SELECT jsonb_agg(e.event ORDER BY e.sequence) FROM run_events e WHERE e.run_id=r.id),'[]'::jsonb),
+		COALESCE((SELECT jsonb_agg(n.node_run ORDER BY n.ordinal) FROM node_runs n WHERE n.run_id=r.id),'[]'::jsonb)
+		FROM run_leases rl
+		JOIN runs r ON r.id=rl.run_id
+		WHERE rl.released_at IS NULL
+		  AND rl.expires_at <= $1
+		  AND r.status = ANY($2::text[])
+		FOR UPDATE OF rl, r`,
+		occurredAt, []string{"created", "queued", "running", "paused", "waiting"},
+	)
+	if err != nil {
+		return 0, translate(err)
+	}
+	type expiredRun struct {
+		id          string
+		raw         []byte
+		status      string
+		startedAt   *time.Time
+		completedAt *time.Time
+		outputRaw   []byte
+		runError    string
+		eventsRaw   []byte
+		nodeRunsRaw []byte
+	}
+	persisted := []expiredRun{}
+	for rows.Next() {
+		var item expiredRun
+		if err := rows.Scan(&item.id, &item.raw, &item.status, &item.startedAt, &item.completedAt, &item.outputRaw, &item.runError, &item.eventsRaw, &item.nodeRunsRaw); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		persisted = append(persisted, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
+	rows.Close()
+
+	interrupted := 0
+	for _, item := range persisted {
+		run, decodeErr := decodeRun(item.raw, item.status, item.startedAt, item.completedAt, item.outputRaw, item.runError, item.eventsRaw, item.nodeRunsRaw)
+		if decodeErr != nil {
+			return 0, decodeErr
+		}
+		run.ID = item.id
+		run.Status = item.status
+		run = interruptRun(run, occurredAt)
+		event := run.Events[len(run.Events)-1]
+		eventRaw, err := json.Marshal(event)
+		if err != nil {
+			return 0, err
+		}
+		tag, err := tx.Exec(ctx, `UPDATE runs
+			SET status='interrupted',completed_at=$2,error=$3,updated_at=now()
+			WHERE id=$1 AND status = ANY($4::text[])`,
+			run.ID, run.CompletedAt, run.Error, []string{"created", "queued", "running", "paused", "waiting"})
+		if err != nil {
+			return 0, translate(err)
+		}
+		if tag.RowsAffected() == 0 {
+			continue
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO run_events(run_id,sequence,event,occurred_at)
+			VALUES($1,$2,$3,$4)`, run.ID, event.Sequence, eventRaw, event.OccurredAt); err != nil {
+			return 0, translate(err)
+		}
+		if _, err := tx.Exec(ctx, `UPDATE run_leases SET released_at=$2,expires_at=$2
+			WHERE run_id=$1 AND released_at IS NULL`, run.ID, occurredAt); err != nil {
+			return 0, translate(err)
+		}
+		interrupted++
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return interrupted, nil
+}
+
+func (p *Postgres) UpdateRunWithLease(ctx context.Context, run domain.Run, instanceID string, now time.Time) error {
+	if instanceID == "" || now.IsZero() {
+		return fmt.Errorf("instance id and update time are required")
+	}
+	now = now.UTC()
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	lease, found, err := p.runLeaseByID(ctx, tx, run.ID)
+	if err != nil {
+		return err
+	}
+	if !found || lease.InstanceID != instanceID || !activeLease(lease, now) {
+		return ErrRunLeaseLost
+	}
+	raw, err := marshalRunPayload(run)
+	if err != nil {
+		return err
+	}
+	outputRaw, err := marshalOptionalJSON(run.Output)
+	if err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, `UPDATE runs SET
+		status=$2,payload=$3,started_at=$4,completed_at=$5,output=$6,error=$7,updated_at=now()
+		WHERE id=$1`, run.ID, run.Status, raw, run.StartedAt, run.CompletedAt, outputRaw, run.Error)
+	if err != nil {
+		return translate(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit(ctx)
+}
+
+func (p *Postgres) AppendRunEventWithLease(
+	ctx context.Context,
+	run domain.Run,
+	event domain.Event,
+	instanceID string,
+	now time.Time,
+) error {
+	if instanceID == "" || now.IsZero() {
+		return fmt.Errorf("instance id and append time are required")
+	}
+	now = now.UTC()
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	lease, found, err := p.runLeaseByID(ctx, tx, run.ID)
+	if err != nil {
+		return err
+	}
+	if !found || lease.InstanceID != instanceID || !activeLease(lease, now) {
+		return ErrRunLeaseLost
+	}
+	outputRaw, err := marshalOptionalJSON(run.Output)
+	if err != nil {
+		return err
+	}
+	eventRaw, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	var currentStatus string
+	var legacyMaxSequence int64
+	if err := tx.QueryRow(ctx, `SELECT status,COALESCE((
+		SELECT MAX((legacy_event->>'sequence')::bigint)
+		FROM jsonb_array_elements(CASE
+			WHEN jsonb_typeof(payload->'events')='array' THEN payload->'events'
+			ELSE '[]'::jsonb
+		END) AS legacy_event
+	),0)
+		FROM runs WHERE id=$1 FOR UPDATE`, run.ID).Scan(&currentStatus, &legacyMaxSequence); err != nil {
+		return translate(err)
+	}
+	if !activeRunStatus(currentStatus) {
+		return ErrConflict
+	}
+	var normalizedMaxSequence int64
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(sequence),0) FROM run_events WHERE run_id=$1`, run.ID).Scan(&normalizedMaxSequence); err != nil {
+		return translate(err)
+	}
+	if normalizedMaxSequence > legacyMaxSequence {
+		legacyMaxSequence = normalizedMaxSequence
+	}
+	expectedSequence := legacyMaxSequence + 1
+	if event.Sequence != expectedSequence {
+		return ErrConflict
+	}
+	_, err = tx.Exec(ctx, `UPDATE runs SET
+		status=$2,started_at=$3,completed_at=$4,output=$5,error=$6,updated_at=now()
+		WHERE id=$1`, run.ID, run.Status, run.StartedAt, run.CompletedAt, outputRaw, run.Error)
+	if err != nil {
+		return translate(err)
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO run_events(run_id,sequence,event,occurred_at)
+		VALUES($1,$2,$3,$4)`, run.ID, event.Sequence, eventRaw, event.OccurredAt); err != nil {
+		return translate(err)
+	}
+	if len(run.NodeRuns) > 0 {
+		if _, err = tx.Exec(ctx, `DELETE FROM node_runs WHERE run_id=$1`, run.ID); err != nil {
+			return translate(err)
+		}
+		for index, nodeRun := range run.NodeRuns {
+			nodeRaw, marshalErr := json.Marshal(nodeRun)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			if _, err = tx.Exec(ctx, `INSERT INTO node_runs(run_id,ordinal,node_run) VALUES($1,$2,$3)`, run.ID, index, nodeRaw); err != nil {
+				return translate(err)
+			}
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+func (p *Postgres) ListRunEvents(ctx context.Context, runID string, afterSequence int64, limit int) ([]domain.Event, error) {
+	if afterSequence < 0 || limit < 1 || limit > MaxRunEventListLimit {
+		return nil, fmt.Errorf("invalid run event cursor or limit")
+	}
+	rows, err := p.pool.Query(ctx, `SELECT event
+		FROM run_events
+		WHERE run_id=$1 AND sequence > $2
+		ORDER BY sequence
+		LIMIT $3`, runID, afterSequence, limit)
+	if err != nil {
+		return nil, translate(err)
+	}
+	defer rows.Close()
+	events := make([]domain.Event, 0, limit)
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		var event domain.Event
+		if err := json.Unmarshal(raw, &event); err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+	return events, rows.Err()
+}
+
+func (p *Postgres) lockQuotaScope(ctx context.Context, tx pgx.Tx, scope string) error {
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, scope)
+	return translate(err)
+}
+
+type quotaCheck struct {
+	scope      RunQuotaScope
+	retryAfter time.Duration
+}
+
+func (p *Postgres) runQuotaExceeded(
+	ctx context.Context,
+	tx pgx.Tx,
+	excludedRunID, actorID, projectID string,
+	limits RunCapacityLimits,
+	now time.Time,
+) (bool, quotaCheck) {
+	if limits.Global > 0 {
+		if hit, retry, err := p.checkRunQuota(ctx, tx, excludedRunID, "", "", limits.Global, now); err != nil {
+			return true, quotaCheck{scope: RunQuotaGlobal, retryAfter: time.Second}
+		} else if hit {
+			return true, quotaCheck{scope: RunQuotaGlobal, retryAfter: retry}
+		}
+	}
+	if actorID != "" && limits.Actor > 0 {
+		if hit, retry, err := p.checkRunQuota(ctx, tx, excludedRunID, actorID, "", limits.Actor, now); err != nil {
+			return true, quotaCheck{scope: RunQuotaActor, retryAfter: time.Second}
+		} else if hit {
+			return true, quotaCheck{scope: RunQuotaActor, retryAfter: retry}
+		}
+	}
+	if projectID != "" && limits.Project > 0 {
+		if hit, retry, err := p.checkRunQuota(ctx, tx, excludedRunID, "", projectID, limits.Project, now); err != nil {
+			return true, quotaCheck{scope: RunQuotaProject, retryAfter: time.Second}
+		} else if hit {
+			return true, quotaCheck{scope: RunQuotaProject, retryAfter: retry}
+		}
+	}
+	return false, quotaCheck{}
+}
+
+func (p *Postgres) checkRunQuota(
+	ctx context.Context,
+	tx pgx.Tx,
+	excludedRunID, actorID, projectID string,
+	limit int,
+	now time.Time,
+) (bool, time.Duration, error) {
+	if limit < 0 {
+		return false, 0, fmt.Errorf("run capacity limits cannot be negative")
+	}
+	var count int
+	var earliest time.Time
+	statuses := []string{"created", "queued", "running", "paused", "waiting"}
+	switch {
+	case actorID != "":
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*), COALESCE(MIN(expires_at), now())
+			FROM run_leases rl
+			JOIN runs r ON r.id=rl.run_id
+			WHERE rl.released_at IS NULL AND rl.expires_at > $1
+			  AND r.status = ANY($2::text[])
+			  AND rl.run_id <> $3 AND rl.actor_id = $4`, now, statuses, excludedRunID, actorID).Scan(&count, &earliest); err != nil {
+			return false, 0, translate(err)
+		}
+	case projectID != "":
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*), COALESCE(MIN(expires_at), now())
+			FROM run_leases rl
+			JOIN runs r ON r.id=rl.run_id
+			WHERE rl.released_at IS NULL AND rl.expires_at > $1
+			  AND r.status = ANY($2::text[])
+			  AND rl.run_id <> $3 AND rl.project_id = $4::uuid`, now, statuses, excludedRunID, projectID).Scan(&count, &earliest); err != nil {
+			return false, 0, translate(err)
+		}
+	default:
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*), COALESCE(MIN(expires_at), now())
+			FROM run_leases rl
+			JOIN runs r ON r.id=rl.run_id
+			WHERE rl.released_at IS NULL AND rl.expires_at > $1
+			  AND r.status = ANY($2::text[])
+			  AND rl.run_id <> $3`, now, statuses, excludedRunID).Scan(&count, &earliest); err != nil {
+			return false, 0, translate(err)
+		}
+	}
+	if count < limit {
+		return false, 0, nil
+	}
+	return true, normalizedRetryAfter(earliest.Sub(now)), nil
+}
+
+func (p *Postgres) runLeaseByID(ctx context.Context, tx pgx.Tx, runID string) (RunLease, bool, error) {
+	var lease RunLease
+	var releasedAt *time.Time
+	err := tx.QueryRow(ctx, `SELECT run_id,instance_id,actor_id,project_id,acquired_at,heartbeat_at,expires_at,released_at
+		FROM run_leases WHERE run_id=$1 FOR UPDATE`, runID).
+		Scan(&lease.RunID, &lease.InstanceID, &lease.ActorID, &lease.ProjectID, &lease.AcquiredAt, &lease.HeartbeatAt, &lease.ExpiresAt, &releasedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return RunLease{}, false, nil
+	}
+	if err != nil {
+		return RunLease{}, false, translate(err)
+	}
+	lease.ReleasedAt = releasedAt
+	return cloneRunLease(lease), true, nil
 }
 
 func (p *Postgres) CreateShare(ctx context.Context, share domain.ShareLink) error {

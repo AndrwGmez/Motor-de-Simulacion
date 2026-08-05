@@ -1,12 +1,12 @@
 import { ApiHttpError, apiBaseUrl, apiFetch, apiHeaders, csrfToken, hasConfiguredApi, httpError } from "./api-client";
-import Ajv2020 from "ajv/dist/2020";
-import addFormats from "ajv-formats";
-import flowDefinitionSchema from "../../../../packages/contracts/schemas/flow-definition.schema.json";
 import { DEMO_DOCUMENT } from "@flowverse/core";
 import { createSimulationPlan } from "@flowverse/engine";
+import { isFlowDefinition, parseImportedFlow } from "./flow-contract";
+import { recordLocalFlowVersion } from "./version-service";
 import type {
   EditableFlow,
   FlowDefinition,
+  FlowVersion,
   RunEvent,
   RunSummary,
   SimulationOverrides,
@@ -15,9 +15,6 @@ import type {
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL?.replace(/\/$/, "");
 const STORAGE_PREFIX = "flowverse:flow:";
-const flowSchemaValidator = new Ajv2020({ allErrors: true, strict: false });
-addFormats(flowSchemaValidator);
-const validateFlowDefinitionSchema = flowSchemaValidator.compile(flowDefinitionSchema);
 
 function revisionFromEtag(etag: string | null | undefined, fallback = 1): number {
   const parsed = Number(etag?.replaceAll('"', "").replace("W/", ""));
@@ -102,31 +99,7 @@ function publicRunSummary(value: PublicRun, versionId: string): RunSummary | und
   };
 }
 
-function isFlowDefinition(value: unknown): value is FlowDefinition {
-  return validateFlowDefinitionSchema(value);
-}
-
-export function parseImportedFlow(value: unknown): FlowDefinition {
-  let candidate = value;
-  for (let depth = 0; depth < 3 && candidate && typeof candidate === "object" && !isFlowDefinition(candidate); depth += 1) {
-    const envelope = candidate as Record<string, unknown>;
-    candidate = envelope.definition ?? envelope.proposal ?? envelope.flow ?? envelope.data ?? candidate;
-  }
-  if (!isFlowDefinition(candidate)) {
-    const details = (validateFlowDefinitionSchema.errors ?? [])
-      .slice(0, 4)
-      .map((item) => `${item.instancePath || "/"} ${item.message ?? "es inválido"}`)
-      .join("; ");
-    throw new Error(`El archivo no cumple el contrato FlowDefinition 1.0${details ? `: ${details}` : "."}`);
-  }
-  const definition = structuredClone(candidate);
-  // `metadata` es opcional en el contrato y la API lo omite cuando está vacío,
-  // pero el editor y las distribuciones lo leen sin comprobarlo.
-  for (const node of definition.nodes) {
-    if (!node.metadata) node.metadata = {};
-  }
-  return definition;
-}
+export { parseImportedFlow } from "./flow-contract";
 
 function isEditableFlow(value: unknown): value is EditableFlow {
   if (!value || typeof value !== "object") return false;
@@ -215,6 +188,7 @@ export async function loadFlow(flowId: string): Promise<EditableFlow> {
 
 export async function saveFlow(
   document: EditableFlow,
+  options: { keepalive?: boolean } = {},
 ): Promise<{ revision: number; etag: string; source: "api" | "local" }> {
   const nextRevision = document.revision + 1;
   const next = {
@@ -234,6 +208,7 @@ export async function saveFlow(
         ...(csrf ? { "X-CSRF-Token": csrf } : {}),
       },
       body: JSON.stringify(document.definition),
+      keepalive: options.keepalive,
     });
     if (response.ok) {
       const etag = response.headers.get("ETag") ?? document.etag;
@@ -543,29 +518,30 @@ export interface CreatedShare {
   source: "api" | "local";
 }
 
-export interface PublishedVersion {
-  id: string;
-  flowId: string;
-  number: number;
-  checksum: string;
-  publishedAt: string;
-  publishedBy: string;
-}
+export type PublishedVersion = FlowVersion;
 
 export async function publishFlow(
   document: EditableFlow,
 ): Promise<{ version: PublishedVersion; etag: string }> {
   if (!hasConfiguredApi) {
     const number = (document.publishedVersionNumber ?? 0) + 1;
+    const version: FlowVersion = {
+      id: crypto.randomUUID(),
+      flowId: document.flowId,
+      number,
+      checksum: document.etag.replace(/^W\//, "").replace(/^"|"$/g, ""),
+      publishedAt: new Date().toISOString(),
+      publishedBy: "demo-user",
+    };
+    recordLocalFlowVersion({ version, definition: document.definition });
+    globalThis.localStorage?.setItem(`${STORAGE_PREFIX}${document.flowId}`, JSON.stringify({
+      ...document,
+      publishedVersionId: version.id,
+      publishedVersionNumber: version.number,
+      draftMatchesPublished: true,
+    } satisfies EditableFlow));
     return {
-      version: {
-        id: crypto.randomUUID(),
-        flowId: document.flowId,
-        number,
-        checksum: `demo-${document.revision}`,
-        publishedAt: new Date().toISOString(),
-        publishedBy: "demo-user",
-      },
+      version,
       etag: document.etag,
     };
   }

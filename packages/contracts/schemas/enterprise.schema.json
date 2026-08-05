@@ -1,0 +1,397 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://flowverse.dev/schemas/enterprise.schema.json",
+  "title": "Flowverse Enterprise Organization",
+  "$ref": "#/$defs/Organization",
+  "$defs": {
+    "UUID": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "Timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "OrganizationRole": {
+      "type": "string",
+      "enum": ["owner", "admin", "member", "auditor"]
+    },
+    "Organization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "slug", "name", "status", "createdAt", "updatedAt"],
+      "properties": {
+        "id": { "$ref": "#/$defs/UUID" },
+        "slug": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63,
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+        },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "status": { "type": "string", "enum": ["active", "suspended"] },
+        "createdAt": { "$ref": "#/$defs/Timestamp" },
+        "updatedAt": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "OrganizationMembership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["organizationId", "userId", "role", "status", "createdAt"],
+      "properties": {
+        "organizationId": { "$ref": "#/$defs/UUID" },
+        "userId": { "$ref": "#/$defs/UUID" },
+        "role": { "$ref": "#/$defs/OrganizationRole" },
+        "status": { "type": "string", "enum": ["invited", "active", "suspended"] },
+        "createdAt": { "$ref": "#/$defs/Timestamp" },
+        "joinedAt": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "OrganizationMemberView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["organizationId", "userId", "email", "displayName", "role", "status", "createdAt"],
+      "properties": {
+        "organizationId": { "$ref": "#/$defs/UUID" },
+        "userId": { "$ref": "#/$defs/UUID" },
+        "email": { "type": "string", "format": "email", "maxLength": 320 },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "role": { "$ref": "#/$defs/OrganizationRole" },
+        "status": { "type": "string", "enum": ["invited", "active", "suspended"] },
+        "createdAt": { "$ref": "#/$defs/Timestamp" },
+        "joinedAt": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "SSOConnection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "organizationId", "name", "protocol", "domains", "enabled", "createdAt", "updatedAt"],
+      "properties": {
+        "id": { "$ref": "#/$defs/UUID" },
+        "organizationId": { "$ref": "#/$defs/UUID" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "protocol": { "type": "string", "enum": ["oidc", "saml"] },
+        "issuerUrl": { "type": "string", "format": "uri", "maxLength": 2048 },
+        "metadataUrl": { "type": "string", "format": "uri", "maxLength": 2048 },
+        "entityId": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "signInUrl": { "type": "string", "format": "uri", "maxLength": 2048 },
+        "certificateFingerprint": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "domains": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 253,
+            "pattern": "^[a-z0-9.-]+$"
+          }
+        },
+        "enabled": { "type": "boolean" },
+        "createdAt": { "$ref": "#/$defs/Timestamp" },
+        "updatedAt": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "PolicyConditions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "roles": {
+          "type": "array",
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/OrganizationRole" }
+        }
+      }
+    },
+    "PolicyRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "organizationId", "effect", "actions", "resources", "conditions", "disabled", "createdAt", "updatedAt"],
+      "properties": {
+        "id": { "$ref": "#/$defs/UUID" },
+        "organizationId": { "$ref": "#/$defs/UUID" },
+        "description": { "type": "string", "maxLength": 500 },
+        "effect": { "type": "string", "enum": ["allow", "deny"] },
+        "actions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+        },
+        "resources": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+        },
+        "conditions": { "$ref": "#/$defs/PolicyConditions" },
+        "disabled": { "type": "boolean" },
+        "createdAt": { "$ref": "#/$defs/Timestamp" },
+        "updatedAt": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "PolicyDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed", "effect", "reason", "matchedRuleIds"],
+      "properties": {
+        "allowed": { "type": "boolean" },
+        "effect": { "type": "string", "enum": ["allow", "deny"] },
+        "reason": {
+          "type": "string",
+          "enum": ["explicit_allow", "explicit_deny", "no_matching_rule"]
+        },
+        "matchedRuleIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/UUID" }
+        }
+      }
+    },
+    "PluginRegistration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "organizationId", "pluginKey", "version", "status", "sourceUrl", "checksum", "capabilities", "createdAt", "updatedAt"],
+      "properties": {
+        "id": { "$ref": "#/$defs/UUID" },
+        "organizationId": { "$ref": "#/$defs/UUID" },
+        "pluginKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$"
+        },
+        "version": { "type": "string", "minLength": 5, "maxLength": 128 },
+        "status": { "type": "string", "enum": ["active", "disabled", "revoked"] },
+        "sourceUrl": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "checksum": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "capabilities": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 512 }
+        },
+        "installedBy": { "$ref": "#/$defs/UUID" },
+        "createdAt": { "$ref": "#/$defs/Timestamp" },
+        "updatedAt": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "AuditEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "organizationId", "sequence", "action", "resourceType", "resourceId", "outcome", "metadata", "occurredAt", "previousHash", "hash"],
+      "properties": {
+        "id": { "$ref": "#/$defs/UUID" },
+        "organizationId": { "$ref": "#/$defs/UUID" },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "actorId": { "$ref": "#/$defs/UUID" },
+        "action": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "resourceType": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "resourceId": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "outcome": { "type": "string", "enum": ["succeeded", "denied", "failed"] },
+        "requestId": { "type": "string", "maxLength": 100 },
+        "sourceIp": {
+          "type": "string",
+          "oneOf": [
+            { "type": "string", "format": "ipv4" },
+            { "type": "string", "format": "ipv6" }
+          ]
+        },
+        "metadata": { "type": "object" },
+        "occurredAt": { "$ref": "#/$defs/Timestamp" },
+        "previousHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "AuditCheckpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["organizationId", "lastSequence", "lastHash"],
+      "properties": {
+        "organizationId": { "$ref": "#/$defs/UUID" },
+        "lastSequence": { "type": "integer", "minimum": 0 },
+        "lastHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "AuditVerification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["valid", "eventCount", "checkpoint"],
+      "properties": {
+        "valid": { "type": "boolean" },
+        "eventCount": { "type": "integer", "minimum": 0 },
+        "checkpoint": { "$ref": "#/$defs/AuditCheckpoint" },
+        "failure": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["reason"],
+          "properties": {
+            "index": { "type": "integer", "minimum": 0 },
+            "eventId": { "$ref": "#/$defs/UUID" },
+            "reason": { "type": "string", "minLength": 1, "maxLength": 1024 }
+          }
+        }
+      }
+    },
+    "OrganizationCreate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slug", "name"],
+      "properties": {
+        "slug": { "type": "string", "minLength": 1, "maxLength": 63 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 }
+      }
+    },
+    "OrganizationList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items"],
+      "properties": {
+        "items": { "type": "array", "items": { "$ref": "#/$defs/Organization" } }
+      }
+    },
+    "OrganizationMemberSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["email", "role"],
+      "properties": {
+        "email": { "type": "string", "format": "email", "maxLength": 320 },
+        "role": { "$ref": "#/$defs/OrganizationRole" },
+        "status": { "type": "string", "enum": ["active", "suspended"], "default": "active" }
+      }
+    },
+    "OrganizationMemberList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items"],
+      "properties": {
+        "items": { "type": "array", "items": { "$ref": "#/$defs/OrganizationMemberView" } }
+      }
+    },
+    "SSOConnectionInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "protocol", "domains", "enabled"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "protocol": { "type": "string", "enum": ["oidc", "saml"] },
+        "issuerUrl": { "type": "string", "format": "uri", "maxLength": 2048 },
+        "metadataUrl": { "type": "string", "format": "uri", "maxLength": 2048 },
+        "entityId": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "signInUrl": { "type": "string", "format": "uri", "maxLength": 2048 },
+        "certificateFingerprint": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "domains": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 3, "maxLength": 253 }
+        },
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "SSOConnectionList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items"],
+      "properties": {
+        "items": { "type": "array", "items": { "$ref": "#/$defs/SSOConnection" } }
+      }
+    },
+    "PolicyRuleInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["effect", "actions", "resources", "conditions", "disabled"],
+      "properties": {
+        "description": { "type": "string", "maxLength": 500 },
+        "effect": { "type": "string", "enum": ["allow", "deny"] },
+        "actions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+        },
+        "resources": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+        },
+        "conditions": { "$ref": "#/$defs/PolicyConditions" },
+        "disabled": { "type": "boolean" }
+      }
+    },
+    "PolicyRuleList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items"],
+      "properties": {
+        "items": { "type": "array", "items": { "$ref": "#/$defs/PolicyRule" } }
+      }
+    },
+    "PolicyEvaluationInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "resource"],
+      "properties": {
+        "action": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "resource": { "type": "string", "minLength": 1, "maxLength": 512 }
+      }
+    },
+    "PluginRegistrationInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pluginKey", "version", "sourceUrl", "checksum", "capabilities"],
+      "properties": {
+        "pluginKey": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "version": { "type": "string", "minLength": 5, "maxLength": 128 },
+        "status": { "type": "string", "enum": ["active", "disabled"], "default": "disabled" },
+        "sourceUrl": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "checksum": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "capabilities": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 512 }
+        }
+      }
+    },
+    "PluginStatusInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": { "type": "string", "enum": ["active", "disabled", "revoked"] }
+      }
+    },
+    "PluginRegistrationList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items"],
+      "properties": {
+        "items": { "type": "array", "items": { "$ref": "#/$defs/PluginRegistration" } }
+      }
+    },
+    "AuditEventList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items", "afterSequence", "nextAfterSequence", "limit", "hasMore"],
+      "properties": {
+        "items": { "type": "array", "items": { "$ref": "#/$defs/AuditEvent" } },
+        "afterSequence": { "type": "integer", "minimum": 0 },
+        "nextAfterSequence": { "type": "integer", "minimum": 0 },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 200 },
+        "hasMore": { "type": "boolean" }
+      }
+    }
+  }
+}

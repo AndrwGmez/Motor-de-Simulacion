@@ -9,6 +9,7 @@ import {
   type FlowDefinition,
   type FlowEdge,
   type FlowNode,
+  type FlowVersionSnapshot,
   type LayoutMode,
   type NodeRunStatus,
   type NodeType,
@@ -50,6 +51,12 @@ interface FlowState {
 
   loadDocument: (document: EditableFlow) => void;
   replaceDefinition: (definition: FlowDefinition) => void;
+  applyRestoredVersion: (
+    snapshot: FlowVersionSnapshot,
+    revision: number,
+    etag: string,
+    source: "api" | "local",
+  ) => void;
   updateFlowMeta: (changes: Pick<Partial<FlowDefinition>, "name" | "description">) => void;
   addNode: (type: NodeType) => string;
   updateNode: (nodeId: string, changes: Partial<FlowNode>) => void;
@@ -68,6 +75,12 @@ interface FlowState {
   redo: () => void;
   markSaving: () => void;
   markSaved: (revision: number, etag: string, source: "api" | "local") => void;
+  completeAutosave: (
+    savedDocument: EditableFlow,
+    revision: number,
+    etag: string,
+    source: "api" | "local",
+  ) => void;
   markSaveError: (conflict?: boolean) => void;
   markPublished: (versionId: string, versionNumber: number, etag?: string) => void;
   setValidationIssues: (issues: ValidationIssue[]) => void;
@@ -189,6 +202,43 @@ export const useFlowStore = create<FlowState>((set, get) => ({
       activePlan: undefined,
       activeEdgeId: undefined,
     })),
+
+  applyRestoredVersion: (snapshot, revision, etag, saveSource) =>
+    set((state) => {
+      const definition = clone(snapshot.definition);
+      const changed = changedState(state, definition);
+      const changedDocument = changed.document as EditableFlow;
+      return {
+        ...changed,
+        document: {
+          ...changedDocument,
+          // Sigue siendo el borrador editable del flujo. La versión elegida
+          // permanece inmutable y solo sirve como origen de esta copia.
+          versionId: state.document.versionId,
+          status: "draft",
+          revision,
+          etag,
+          draftMatchesPublished: snapshot.version.id === state.document.publishedVersionId,
+          updatedAt: new Date().toISOString(),
+        },
+        saveStatus: "saved",
+        saveSource,
+        lastSavedAt: new Date().toISOString(),
+        selectedNodeId: undefined,
+        selectedNodeIds: [],
+        selectedEdgeId: undefined,
+        nodeStates: initialNodeStates(definition),
+        runStatus: "idle",
+        runSource: "local",
+        remoteRunId: undefined,
+        streamStatus: "idle",
+        plannedEvents: [],
+        eventCursor: 0,
+        visibleEvents: [],
+        activePlan: undefined,
+        activeEdgeId: undefined,
+      };
+    }),
 
   updateFlowMeta: (changes) =>
     set((state) => changedState(state, { ...state.document.definition, ...changes })),
@@ -346,7 +396,11 @@ export const useFlowStore = create<FlowState>((set, get) => ({
         selectedEdgeId: undefined,
       };
     }),
-  selectEdge: (selectedEdgeId) => set({ selectedEdgeId, selectedNodeId: undefined }),
+  selectEdge: (selectedEdgeId) => set({
+    selectedEdgeId,
+    selectedNodeId: undefined,
+    selectedNodeIds: [],
+  }),
   clearSelection: () => set({ selectedNodeId: undefined, selectedNodeIds: [], selectedEdgeId: undefined }),
 
   changeLayout: (mode) =>
@@ -409,6 +463,32 @@ export const useFlowStore = create<FlowState>((set, get) => ({
       saveSource,
       lastSavedAt: new Date().toISOString(),
     })),
+  completeAutosave: (savedDocument, revision, etag, saveSource) =>
+    set((state) => {
+      // El editor puede haber cargado otro flujo mientras la petición estaba
+      // en curso. En ese caso, la respuesta antigua no debe tocarlo.
+      if (state.document.flowId !== savedDocument.flowId) return {};
+
+      const savedDefinitionIsCurrent = state.document.definition === savedDocument.definition;
+      const responseIsCurrent = revision >= state.document.revision;
+      return {
+        document: responseIsCurrent
+          ? {
+              ...state.document,
+              revision,
+              etag,
+              updatedAt: savedDefinitionIsCurrent
+                ? new Date().toISOString()
+                : state.document.updatedAt,
+            }
+          : state.document,
+        // Si el usuario editó durante el request, el servidor solo tiene la
+        // instantánea anterior: conservamos "dirty" y guardamos otra vez.
+        saveStatus: savedDefinitionIsCurrent ? "saved" : "dirty",
+        saveSource,
+        lastSavedAt: new Date().toISOString(),
+      };
+    }),
   markSaveError: (conflict = false) => set({ saveStatus: conflict ? "conflict" : "error" }),
   markPublished: (publishedVersionId, publishedVersionNumber, etag) =>
     set((state) => ({

@@ -57,8 +57,17 @@ async function assertLocalReferencesExist(document, sourceFile) {
     ) {
       continue;
     }
-    const filePart = reference.split("#", 1)[0];
-    await access(path.resolve(directory, filePart));
+    const [filePart, fragment] = reference.split("#", 2);
+    const absolutePath = path.resolve(directory, filePart);
+    await access(absolutePath);
+    if (fragment?.startsWith("/") && filePart.endsWith(".json")) {
+      const referencedDocument = JSON.parse(await readFile(absolutePath, "utf8"));
+      assert.notEqual(
+        resolveJsonPointer(referencedDocument, `#${fragment}`),
+        undefined,
+        `${sourceFile}: referencia externa inexistente ${reference}`
+      );
+    }
   }
 }
 
@@ -139,6 +148,10 @@ export async function validateAllContracts() {
   );
   const eventSchema = await readJson("schemas/run-event.schema.json");
   const proposalSchema = await readJson("schemas/parse-proposal.schema.json");
+  const flowDiffSchema = await readJson("schemas/flow-diff.schema.json");
+  const incidentReportSchema = await readJson("schemas/incident-report.schema.json");
+  const evidenceCopilotSchema = await readJson("schemas/evidence-copilot.schema.json");
+  const enterpriseSchema = await readJson("schemas/enterprise.schema.json");
 
   const ajv = new Ajv2020({
     allErrors: true,
@@ -150,12 +163,20 @@ export async function validateAllContracts() {
   ajv.addSchema(simulationSchema);
   ajv.addSchema(eventSchema);
   ajv.addSchema(proposalSchema);
+  ajv.addSchema(flowDiffSchema);
+  ajv.addSchema(incidentReportSchema);
+  ajv.addSchema(evidenceCopilotSchema);
+  ajv.addSchema(enterpriseSchema);
 
   const validateFlow = ajv.getSchema(flowSchema.$id);
   assert(validateFlow, "No se compiló FlowDefinition");
   assert(ajv.getSchema(simulationSchema.$id), "No se compiló SimulationRequest");
   assert(ajv.getSchema(eventSchema.$id), "No se compiló RunEvent");
   assert(ajv.getSchema(proposalSchema.$id), "No se compiló ParseProposal");
+  assert(ajv.getSchema(flowDiffSchema.$id), "No se compiló FlowSemanticDiff");
+  assert(ajv.getSchema(incidentReportSchema.$id), "No se compiló IncidentTimeMachineReport");
+  assert(ajv.getSchema(evidenceCopilotSchema.$id), "No se compiló EvidenceCopilotResponse");
+  assert(ajv.getSchema(enterpriseSchema.$id), "No se compiló EnterpriseOrganization");
 
   await validateFixtureDirectory("fixtures/valid", validateFlow, true);
   await validateFixtureDirectory("fixtures/invalid", validateFlow, false);
@@ -182,7 +203,7 @@ export async function validateAllContracts() {
   await assertLocalReferencesExist(asyncapi, "asyncapi.yaml");
 
   return {
-    schemas: 4,
+    schemas: 8,
     fixturesChecked: 2,
     generatedNodes: largeFixture.nodes.length,
     generatedEdges: largeFixture.edges.length,

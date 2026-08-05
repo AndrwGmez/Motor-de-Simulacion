@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://flowverse.dev/schemas/evidence-copilot.schema.json",
+  "title": "EvidenceCopilotResponse",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "provider",
+    "summary",
+    "suggestions",
+    "limitations",
+    "evidence"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "provider": { "enum": ["mock", "openai"] },
+    "summary": { "type": "string", "maxLength": 2000 },
+    "suggestions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": { "$ref": "#/$defs/suggestion" }
+    },
+    "limitations": {
+      "type": "array",
+      "maxItems": 10,
+      "items": { "type": "string", "maxLength": 500 }
+    },
+    "evidence": { "$ref": "#/$defs/evidenceBundle" }
+  },
+  "$defs": {
+    "suggestion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "explanation",
+        "severity",
+        "confidence",
+        "evidenceIds",
+        "actions"
+      ],
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "explanation": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "severity": { "enum": ["info", "warning", "critical"] },
+        "confidence": { "enum": ["low", "medium", "high"] },
+        "evidenceIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "actions": {
+          "type": "array",
+          "maxItems": 5,
+          "items": { "$ref": "#/$defs/action" }
+        }
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "targetId", "label"],
+      "properties": {
+        "kind": {
+          "enum": ["inspect_node", "inspect_edge", "open_incident", "none"]
+        },
+        "targetId": {
+          "type": ["string", "null"]
+        },
+        "label": { "type": "string", "minLength": 1, "maxLength": 160 }
+      }
+    },
+    "evidenceBundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "flowId", "items", "truncated"],
+      "properties": {
+        "schemaVersion": { "const": "1.0" },
+        "flowId": { "type": "string", "format": "uuid" },
+        "items": {
+          "type": "array",
+          "maxItems": 600,
+          "items": { "$ref": "#/$defs/evidenceItem" }
+        },
+        "truncated": { "type": "boolean" }
+      }
+    },
+    "evidenceItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "summary", "facts"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": {
+          "enum": ["flow", "analysis", "validation", "node", "edge", "diff", "incident", "event"]
+        },
+        "summary": { "type": "string" },
+        "nodeId": { "type": "string" },
+        "edgeId": { "type": "string" },
+        "facts": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    }
+  }
+}

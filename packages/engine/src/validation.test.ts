@@ -41,4 +41,27 @@ describe("validateFlow", () => {
     expect(issues.some((issue) => issue.code === "edge.missing_node" && issue.edgeId === "broken-edge")).toBe(true);
     expect(issues.some((issue) => issue.code === "node.unreachable" && issue.nodeId === "orphan")).toBe(true);
   });
+
+  it("rechaza puertos declarados en nodos que no exponen puertos", () => {
+    const flow = structuredClone(DEMO_FLOW);
+    const end = flow.nodes.find((node) => node.type === "end")!;
+    const trigger = flow.nodes.find((node) => node.type === "trigger")!;
+    flow.edges.push({
+      id: "invalid-contract-edge",
+      source: end.id,
+      target: trigger.id,
+      sourcePort: "ghost-output",
+      targetPort: "ghost-input",
+      label: "Contrato imposible",
+      priority: 0,
+      isDefault: false,
+    });
+
+    const issues = validateFlow(flow);
+
+    expect(issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "edge.missing_source_port", edgeId: "invalid-contract-edge" }),
+      expect.objectContaining({ code: "edge.missing_target_port", edgeId: "invalid-contract-edge" }),
+    ]));
+  });
 });

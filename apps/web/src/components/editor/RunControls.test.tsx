@@ -16,6 +16,12 @@ vi.mock("@/lib/flow-service", () => ({
   changeRunSpeed: changeRunSpeedMock,
 }));
 
+vi.mock("./IncidentTimeMachineDialog", () => ({
+  IncidentTimeMachineDialog: ({ open }: { open: boolean }) => open
+    ? <div role="dialog" aria-label="Incident Time Machine de prueba" />
+    : null,
+}));
+
 describe("RunControls", () => {
   beforeEach(() => {
     controlRunMock.mockReset();
@@ -31,6 +37,14 @@ describe("RunControls", () => {
     render(<RunControls onConfigureRun={configure} onOpenHistory={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: "Ejecutar flujo" }));
     expect(configure).toHaveBeenCalledOnce();
+  });
+
+  it("abre Scenario Lab desde los controles del editor", async () => {
+    const user = userEvent.setup();
+    const openLab = vi.fn();
+    render(<RunControls onConfigureRun={vi.fn()} onOpenHistory={vi.fn()} onOpenScenarioLab={openLab} />);
+    await user.click(screen.getByRole("button", { name: "Scenario Lab" }));
+    expect(openLab).toHaveBeenCalledOnce();
   });
 
   it("pausa y avanza una ejecución", async () => {
@@ -55,6 +69,16 @@ describe("RunControls", () => {
     await user.click(screen.getByRole("button", { name: "Reiniciar simulación" }));
     expect(controlRunMock).toHaveBeenCalledWith(runId, "cancel");
     expect(useFlowStore.getState().runStatus).toBe("idle");
+  });
+
+  it("abre Incident Time Machine desde una ejecución remota", async () => {
+    const user = userEvent.setup();
+    useFlowStore.getState().startRemoteSimulation("03fbd9ba-8dd8-4f61-93be-845f067370f9");
+    render(<RunControls onConfigureRun={vi.fn()} onOpenHistory={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "Abrir Incident Time Machine" }));
+
+    expect(screen.getByRole("dialog", { name: "Incident Time Machine de prueba" })).toBeInTheDocument();
   });
 
   it("conserva el estado remoto y muestra el error si pausar falla", async () => {

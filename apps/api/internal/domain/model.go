@@ -242,6 +242,7 @@ type NodeRun struct {
 
 type Run struct {
 	ID             string         `json:"id"`
+	TraceID        string         `json:"traceId,omitempty"`
 	ProjectID      string         `json:"projectId"`
 	FlowID         string         `json:"flowId"`
 	VersionID      string         `json:"versionId,omitempty"`

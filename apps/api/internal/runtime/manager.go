@@ -7,11 +7,15 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/flowverse/flowverse-api/internal/auth"
 	"github.com/flowverse/flowverse-api/internal/domain"
 	"github.com/flowverse/flowverse-api/internal/engine"
 	"github.com/flowverse/flowverse-api/internal/store"
+	"github.com/flowverse/flowverse-api/internal/telemetry"
 )
 
 var (
@@ -21,6 +25,8 @@ var (
 
 type state struct {
 	mu          sync.Mutex
+	context     context.Context
+	span        trace.Span
 	run         domain.Run
 	planned     []domain.Event
 	index       int
@@ -32,6 +38,8 @@ type state struct {
 	speed       float64
 	wake        chan struct{}
 	subs        map[chan domain.Event]struct{}
+	lease       *leaseGuard
+	pausedAt    *time.Time
 }
 
 type ticket struct {
@@ -41,17 +49,24 @@ type ticket struct {
 }
 
 type Manager struct {
-	repository store.Repository
-	mu         sync.RWMutex
-	active     map[string]*state
-	tickets    map[string]ticket
-	tick       time.Duration
+	repository   store.Repository
+	mu           sync.RWMutex
+	active       map[string]*state
+	tickets      map[string]ticket
+	tick         time.Duration
+	reservations map[string]*leaseGuard
+	config       Config
 }
 
 func NewManager(repository store.Repository) *Manager {
+	return NewManagerWithConfig(repository, Config{})
+}
+
+func NewManagerWithConfig(repository store.Repository, config Config) *Manager {
+	config = normalizeConfig(config)
 	return &Manager{
 		repository: repository, active: map[string]*state{}, tickets: map[string]ticket{},
-		tick: 20 * time.Millisecond,
+		tick: 20 * time.Millisecond, reservations: map[string]*leaseGuard{}, config: config,
 	}
 }
 
@@ -59,7 +74,7 @@ func NewManager(repository store.Repository) *Manager {
 // process restart. It must run once during bootstrap before the API accepts
 // traffic; the repository operation is idempotent.
 func (m *Manager) RecoverInterrupted(ctx context.Context, occurredAt time.Time) (int, error) {
-	return m.repository.InterruptActiveRuns(ctx, occurredAt)
+	return m.repository.InterruptExpiredRunLeases(ctx, occurredAt)
 }
 
 func (m *Manager) Start(ctx context.Context, run domain.Run, result engine.SimulationResult) error {
@@ -69,7 +84,23 @@ func (m *Manager) Start(ctx context.Context, run domain.Run, result engine.Simul
 	if err := m.repository.UpdateRun(ctx, run); err != nil {
 		return err
 	}
+	playbackContext, playbackSpan := telemetry.Tracer().Start(
+		context.WithoutCancel(ctx),
+		"flowverse.run.playback",
+		trace.WithAttributes(
+			attribute.String("flowverse.run.id", run.ID),
+			attribute.String("flowverse.flow.id", run.FlowID),
+			attribute.String("flowverse.flow.version_id", run.VersionID),
+			attribute.Int("flowverse.run.planned_events", len(result.Events)),
+		),
+	)
+	target := "draft"
+	if run.VersionID != "" {
+		target = "version"
+	}
+	telemetry.RunStarted(playbackContext, target)
 	current := &state{
+		context: playbackContext, span: playbackSpan,
 		run: run, planned: result.Events, speed: 1, wake: make(chan struct{}, 1),
 		subs: map[chan domain.Event]struct{}{},
 	}
@@ -81,6 +112,7 @@ func (m *Manager) Start(ctx context.Context, run domain.Run, result engine.Simul
 }
 
 func (m *Manager) play(current *state, result engine.SimulationResult) {
+	defer m.finishTelemetry(current)
 	for {
 		current.mu.Lock()
 		if current.cancelled || current.interrupted {
@@ -139,6 +171,7 @@ func (m *Manager) play(current *state, result engine.SimulationResult) {
 		if current.step && (event.Type == "node.completed" || event.Type == "node.failed" || event.Type == "node.skipped") {
 			current.step = false
 			current.paused = true
+			current.run.Status = "paused"
 			if err := m.appendLocked(current, domain.Event{
 				Type: "run.paused", LogicalTimeMS: event.LogicalTimeMS,
 				Payload: map[string]any{"reason": "step_completed"},
@@ -173,15 +206,14 @@ func (m *Manager) appendLocked(current *state, event domain.Event) error {
 	if event.Payload == nil {
 		event.Payload = map[string]any{}
 	}
-	candidate := current.run
-	candidate.Events = append(append([]domain.Event(nil), current.run.Events...), event)
 	// Durability precedes publication. A failed write stops publication and
 	// leaves the last durable sequence available for replay.
-	if err := m.repository.UpdateRun(context.Background(), candidate); err != nil {
+	if err := m.repository.AppendRunEvent(current.context, current.run, event); err != nil {
 		m.interruptLocked(current)
 		return err
 	}
-	current.run = candidate
+	current.run.Events = append(current.run.Events, event)
+	telemetry.RunEvent(current.context, event.Type)
 	m.publishLocked(current, event)
 	return nil
 }
@@ -201,20 +233,35 @@ func (m *Manager) interruptLocked(current *state) {
 		LogicalTimeMS: lastLogical(current.run.Events),
 		Payload:       map[string]any{"code": "persistence.failed"},
 	}
-	candidate := current.run
-	candidate.Status = "interrupted"
-	candidate.Error = "run interrupted because an event could not be persisted"
-	candidate.CompletedAt = &now
-	candidate.Events = append(append([]domain.Event(nil), current.run.Events...), event)
-	if err := m.repository.UpdateRun(context.Background(), candidate); err == nil {
-		current.run = candidate
+	current.run.Status = "interrupted"
+	current.run.Error = "run interrupted because an event could not be persisted"
+	current.run.CompletedAt = &now
+	if err := m.repository.AppendRunEvent(current.context, current.run, event); err == nil {
+		current.run.Events = append(current.run.Events, event)
+		telemetry.RunEvent(current.context, event.Type)
 		m.publishLocked(current, event)
-	} else {
-		current.run.Status = "interrupted"
-		current.run.Error = candidate.Error
-		current.run.CompletedAt = &now
 	}
 	m.closeSubscribersLocked(current)
+}
+
+func (m *Manager) finishTelemetry(current *state) {
+	current.mu.Lock()
+	status, runError := current.run.Status, current.run.Error
+	span := current.span
+	ctx := current.context
+	current.mu.Unlock()
+	telemetry.RunFinished(ctx, status)
+	if span == nil {
+		return
+	}
+	span.SetAttributes(attribute.String("flowverse.run.status", status))
+	if runError != "" {
+		span.RecordError(errors.New(runError))
+		span.SetStatus(codes.Error, runError)
+	} else if status == "completed" {
+		span.SetStatus(codes.Ok, "completed")
+	}
+	span.End()
 }
 
 func (m *Manager) publishLocked(current *state, event domain.Event) {
@@ -247,6 +294,7 @@ func (m *Manager) Pause(runID string) error {
 	return m.control(runID, func(current *state) error {
 		if !current.paused {
 			current.paused = true
+			current.run.Status = "paused"
 			return m.appendLocked(current, domain.Event{
 				Type: "run.paused", LogicalTimeMS: lastLogical(current.run.Events), Payload: map[string]any{},
 			})
@@ -260,6 +308,7 @@ func (m *Manager) Resume(runID string) error {
 		if current.paused {
 			current.paused = false
 			current.step = false
+			current.run.Status = "running"
 			if err := m.appendLocked(current, domain.Event{
 				Type: "run.resumed", LogicalTimeMS: lastLogical(current.run.Events), Payload: map[string]any{},
 			}); err != nil {
@@ -277,6 +326,7 @@ func (m *Manager) Step(runID string) error {
 			return errors.New("run must be paused before stepping")
 		}
 		current.step = true
+		current.run.Status = "running"
 		notify(current.wake)
 		return nil
 	})

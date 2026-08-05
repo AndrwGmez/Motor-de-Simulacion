@@ -2,6 +2,7 @@ package engine
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -216,6 +217,58 @@ func TestSimulatorLimitsAndForcedFailure(t *testing.T) {
 	}
 	if result.Status != "failed" || !strings.Contains(mustJSON(result.Events), "warehouse unavailable") {
 		t.Fatalf("expected forced failure: %+v", result)
+	}
+}
+
+func TestSimulatorRejectsOptionsOutsideContractLimits(t *testing.T) {
+	tooManyInputProperties := map[string]any{}
+	for index := 0; index <= SimulationMaxInputProperties; index++ {
+		tooManyInputProperties[fmt.Sprintf("property-%03d", index)] = index
+	}
+	tooManyOverrides := map[string]string{}
+	for index := 0; index <= SimulationMaxOverrides; index++ {
+		tooManyOverrides[fmt.Sprintf("node-%03d", index)] = "failure"
+	}
+
+	tests := []struct {
+		name    string
+		options RunOptions
+	}{
+		{name: "negative steps", options: RunOptions{MaxSteps: -1}},
+		{name: "excessive steps", options: RunOptions{MaxSteps: SimulationMaxSteps + 1}},
+		{name: "negative visits", options: RunOptions{MaxVisitsPerNode: -1}},
+		{name: "excessive visits", options: RunOptions{MaxVisitsPerNode: SimulationMaxVisitsPerNode + 1}},
+		{name: "excessive input", options: RunOptions{Input: tooManyInputProperties}},
+		{name: "excessive overrides", options: RunOptions{Overrides: RunOverrides{FailedNodes: tooManyOverrides}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := NewSimulator().Run(orderFlow(), test.options); err == nil {
+				t.Fatal("simulation accepted options outside the public contract")
+			}
+		})
+	}
+}
+
+func TestSimulatorAcceptsContractLimitBoundaries(t *testing.T) {
+	input := map[string]any{}
+	for index := 0; index < SimulationMaxInputProperties; index++ {
+		input[fmt.Sprintf("property-%03d", index)] = index
+	}
+	input["payment"] = map[string]any{"status": "approved"}
+	// Keep the total at the contractual maximum after adding the fixture's
+	// required payment value.
+	delete(input, "property-000")
+
+	result, err := NewSimulator().Run(orderFlow(), RunOptions{
+		Input: input, MaxSteps: SimulationMaxSteps,
+		MaxVisitsPerNode: SimulationMaxVisitsPerNode,
+	})
+	if err != nil {
+		t.Fatalf("contract boundary was rejected: %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("boundary simulation status=%s error=%s", result.Status, result.Error)
 	}
 }
 

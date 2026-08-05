@@ -10,9 +10,12 @@ import { NODE_PRESENTATION, NODE_TYPES } from "@flowverse/core";
 import { FlowScene2D } from "@flowverse/viewer";
 import { useFlowStore } from "@/store/flow-store";
 import { FlowScene } from "./FlowScene";
+import { EvidenceCopilotDialog } from "./EvidenceCopilotDialog";
 import { Inspector } from "./Inspector";
 import { NodePalette } from "./NodePalette";
 import { RunControls } from "./RunControls";
+import { ScenarioLabDialog } from "./ScenarioLabDialog";
+import { VersionHistoryDialog } from "./VersionHistoryDialog";
 import {
   AccessibleGraphDialog,
   ExportButton,
@@ -98,6 +101,9 @@ export function EditorClient({ flowId, projectId, readOnly = false, shareToken }
   const [shareOpen, setShareOpen] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [versionsOpen, setVersionsOpen] = useState(false);
+  const [scenarioLabOpen, setScenarioLabOpen] = useState(false);
+  const [copilotOpen, setCopilotOpen] = useState(false);
   const [accessibleOpen, setAccessibleOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const errors = validationIssues.filter((issue) => issue.severity === "error").length;
@@ -107,6 +113,7 @@ export function EditorClient({ flowId, projectId, readOnly = false, shareToken }
   const canEdit = !effectiveReadOnly && (role === "owner" || role === "editor");
   const canPublish = canEdit;
   const canShare = !readOnly && role === "owner";
+  const canViewVersions = !readOnly && Boolean(role);
 
   useAutosave(canEdit && !loading);
 
@@ -253,6 +260,17 @@ export function EditorClient({ flowId, projectId, readOnly = false, shareToken }
           <span className={`save-indicator save-${saveStatus}`}><i />{saveText}</span>
         </div>
         <div className="editor-header-actions">
+          {canViewVersions && (
+            <button type="button" className="header-button copilot-header-trigger" onClick={() => setCopilotOpen(true)}>
+              <span>✦</span> Copiloto
+            </button>
+          )}
+          {canViewVersions && (
+            <button type="button" className="header-button versions-button" onClick={() => setVersionsOpen(true)}>
+              <span>◷</span> Versiones
+              {document.publishedVersionNumber && <b>V{document.publishedVersionNumber}</b>}
+            </button>
+          )}
           {canEdit && (
             <>
               <div className="history-buttons">
@@ -420,6 +438,7 @@ export function EditorClient({ flowId, projectId, readOnly = false, shareToken }
         publicView={readOnly}
         onConfigureRun={() => setRunOpen(true)}
         onOpenHistory={() => setHistoryOpen(true)}
+        onOpenScenarioLab={canEdit ? () => setScenarioLabOpen(true) : undefined}
       />
 
       <ImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
@@ -429,6 +448,21 @@ export function EditorClient({ flowId, projectId, readOnly = false, shareToken }
       <PublishDialog open={publishOpen} onClose={() => setPublishOpen(false)} />
       <ShareDialog open={shareOpen} onClose={() => setShareOpen(false)} />
       <HistoryDialog open={historyOpen} onClose={() => setHistoryOpen(false)} />
+      <VersionHistoryDialog open={versionsOpen} onClose={() => setVersionsOpen(false)} canRestore={canEdit} />
+      <ScenarioLabDialog key={document.flowId} open={scenarioLabOpen} onClose={() => setScenarioLabOpen(false)} />
+      <EvidenceCopilotDialog
+        key={`copilot-${document.flowId}`}
+        open={copilotOpen}
+        onClose={() => setCopilotOpen(false)}
+        onInspectNode={(nodeId) => {
+          selectNode(nodeId);
+          setFitRequest((value) => value + 1);
+        }}
+        onInspectEdge={(edgeId) => {
+          selectEdge(edgeId);
+          setFitRequest((value) => value + 1);
+        }}
+      />
       <AccessibleGraphDialog open={accessibleOpen} onClose={() => setAccessibleOpen(false)} />
     </main>
   );

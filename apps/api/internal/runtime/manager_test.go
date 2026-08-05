@@ -317,6 +317,20 @@ type failingRepository struct {
 }
 
 func (f *failingRepository) UpdateRun(ctx context.Context, run domain.Run) error {
+	if err := f.recordCall(); err != nil {
+		return err
+	}
+	return f.Repository.UpdateRun(ctx, run)
+}
+
+func (f *failingRepository) AppendRunEvent(ctx context.Context, run domain.Run, event domain.Event) error {
+	if err := f.recordCall(); err != nil {
+		return err
+	}
+	return f.Repository.AppendRunEvent(ctx, run, event)
+}
+
+func (f *failingRepository) recordCall() error {
 	f.mu.Lock()
 	f.calls++
 	call := f.calls
@@ -325,7 +339,7 @@ func (f *failingRepository) UpdateRun(ctx context.Context, run domain.Run) error
 	if shouldFail {
 		return errors.New("simulated storage outage")
 	}
-	return f.Repository.UpdateRun(ctx, run)
+	return nil
 }
 
 func (f *failingRepository) callCount() int {

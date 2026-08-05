@@ -23,9 +23,11 @@ type Memory struct {
 	flows        map[string]domain.Flow
 	versions     map[string]domain.FlowVersion
 	runs         map[string]domain.Run
+	runLeases    map[string]RunLease
 	idempotency  map[string]memoryRunIdempotency
 	shares       map[string]domain.ShareLink
 	sharesByHash map[string]string
+	enterprise   enterpriseMemoryState
 }
 
 type memoryRunIdempotency struct {
@@ -41,8 +43,10 @@ func NewMemory() *Memory {
 		sessions: map[string]domain.Session{}, projects: map[string]domain.Project{},
 		members: map[string]map[string]domain.Role{}, flows: map[string]domain.Flow{},
 		versions: map[string]domain.FlowVersion{}, runs: map[string]domain.Run{},
+		runLeases:   map[string]RunLease{},
 		idempotency: map[string]memoryRunIdempotency{}, shares: map[string]domain.ShareLink{},
 		sharesByHash: map[string]string{},
+		enterprise:   newEnterpriseMemoryState(),
 	}
 }
 
@@ -311,7 +315,7 @@ func (m *Memory) ListVersions(_ context.Context, flowID string) ([]domain.FlowVe
 			result = append(result, clone(version))
 		}
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].Number < result[j].Number })
+	sort.Slice(result, func(i, j int) bool { return result[i].Number > result[j].Number })
 	return result, nil
 }
 
@@ -348,6 +352,16 @@ func (m *Memory) CreateRun(_ context.Context, run domain.Run, idempotency RunIde
 		return domain.Run{}, false, ErrConflict
 	}
 	m.runs[run.ID] = clone(run)
+	if activeRunStatus(run.Status) {
+		leaseTime := run.CreatedAt.UTC()
+		if leaseTime.IsZero() {
+			leaseTime = m.now().UTC()
+		}
+		m.runLeases[run.ID] = RunLease{
+			RunID: run.ID, InstanceID: "unassigned", ActorID: idempotency.UserID,
+			ProjectID: run.ProjectID, AcquiredAt: leaseTime, HeartbeatAt: leaseTime, ExpiresAt: leaseTime,
+		}
+	}
 	if idempotency.Key != "" {
 		m.idempotency[memoryIdempotencyKey(idempotency)] = memoryRunIdempotency{
 			RequestHash: idempotency.RequestHash,
@@ -375,6 +389,43 @@ func (m *Memory) UpdateRun(_ context.Context, run domain.Run) error {
 		return ErrNotFound
 	}
 	m.runs[run.ID] = clone(run)
+	return nil
+}
+
+// AppendRunEvent persists the mutable run state and exactly one new event.
+// Keeping this operation separate from UpdateRun prevents every event from
+// copying the complete history as a run grows.
+func (m *Memory) AppendRunEvent(_ context.Context, run domain.Run, event domain.Event) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.appendRunEventLocked(run, event)
+}
+
+func (m *Memory) appendRunEventLocked(run domain.Run, event domain.Event) error {
+	stored, ok := m.runs[run.ID]
+	if !ok {
+		return ErrNotFound
+	}
+	if !activeRunStatus(stored.Status) {
+		return ErrConflict
+	}
+	expectedSequence := int64(1)
+	if count := len(stored.Events); count > 0 {
+		expectedSequence = stored.Events[count-1].Sequence + 1
+	}
+	if event.Sequence != expectedSequence {
+		return ErrConflict
+	}
+	stored.Status = run.Status
+	stored.Output = clone(run.Output)
+	stored.StartedAt = clone(run.StartedAt)
+	stored.CompletedAt = clone(run.CompletedAt)
+	stored.Error = run.Error
+	if len(run.NodeRuns) > 0 {
+		stored.NodeRuns = clone(run.NodeRuns)
+	}
+	stored.Events = append(stored.Events, clone(event))
+	m.runs[run.ID] = stored
 	return nil
 }
 

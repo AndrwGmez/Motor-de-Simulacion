@@ -34,11 +34,21 @@ services:
       AUTO_MIGRATE: "true"
       DATABASE_URL: postgres://${POSTGRES_USER:-flowverse}:${POSTGRES_PASSWORD:-flowverse_local_password}@postgres:5432/${POSTGRES_DB:-flowverse}?sslmode=disable
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:3000}
+      PUBLIC_WS_ORIGIN: ${PUBLIC_WS_ORIGIN:-ws://localhost:8080}
       ACCESS_TOKEN_TTL: ${ACCESS_TOKEN_TTL:-15m}
       REFRESH_TOKEN_TTL: ${REFRESH_TOKEN_TTL:-720h}
       FLOW_PARSER_PROVIDER: ${FLOW_PARSER_PROVIDER:-mock}
+      COPILOT_PROVIDER: ${COPILOT_PROVIDER:-mock}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+      OPENAI_COPILOT_MODEL: ${OPENAI_COPILOT_MODEL:-gpt-4.1-mini}
+      OTEL_ENABLED: ${OTEL_ENABLED:-false}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-flowverse-api}
+      OTEL_SERVICE_VERSION: ${OTEL_SERVICE_VERSION:-dev}
+      OTEL_SAMPLE_RATIO: ${OTEL_SAMPLE_RATIO:-1}
+      OTEL_METRIC_INTERVAL: ${OTEL_METRIC_INTERVAL:-30s}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
+      OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
     ports:
       - "${API_PORT:-8080}:8080"
     depends_on:
@@ -55,6 +65,18 @@ services:
       retries: 10
       start_period: 10s
     stop_grace_period: 15s
+
+  otel-collector:
+    profiles: [observability]
+    image: otel/opentelemetry-collector:0.157.0@sha256:4019ce4d7e7791a1a255fffb2f407af66d5017cc65543469ba565c4f47f795b8
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./deploy/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+      - "127.0.0.1:13133:13133"
+    restart: unless-stopped
 
   web:
     build:

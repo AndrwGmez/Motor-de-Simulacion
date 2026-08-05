@@ -17,6 +17,15 @@ type RunOverrides struct {
 	FailedNodes map[string]string `json:"failedNodes,omitempty"`
 }
 
+const (
+	SimulationDefaultMaxSteps         = 10_000
+	SimulationMaxSteps                = 100_000
+	SimulationDefaultMaxVisitsPerNode = 100
+	SimulationMaxVisitsPerNode        = 10_000
+	SimulationMaxInputProperties      = 250
+	SimulationMaxOverrides            = 100
+)
+
 type RunOptions struct {
 	RunID            string         `json:"runId,omitempty"`
 	TriggerID        string         `json:"triggerId,omitempty"`
@@ -81,6 +90,9 @@ type Simulator struct{}
 func NewSimulator() *Simulator { return &Simulator{} }
 
 func (s *Simulator) Run(flow domain.FlowDefinition, options RunOptions) (SimulationResult, error) {
+	if err := validateRunOptions(options); err != nil {
+		return SimulationResult{}, err
+	}
 	validation := Validate(flow)
 	if !validation.Valid {
 		return SimulationResult{}, fmt.Errorf("flow is invalid")
@@ -488,10 +500,10 @@ func normalizeRunOptions(options *RunOptions) {
 		options.RunID = "run"
 	}
 	if options.MaxSteps <= 0 {
-		options.MaxSteps = 10000
+		options.MaxSteps = SimulationDefaultMaxSteps
 	}
 	if options.MaxVisitsPerNode <= 0 {
-		options.MaxVisitsPerNode = 100
+		options.MaxVisitsPerNode = SimulationDefaultMaxVisitsPerNode
 	}
 	if options.StartedAt.IsZero() {
 		options.StartedAt = time.Now().UTC()
@@ -505,6 +517,22 @@ func normalizeRunOptions(options *RunOptions) {
 	if options.Overrides.FailedNodes == nil {
 		options.Overrides.FailedNodes = map[string]string{}
 	}
+}
+
+func validateRunOptions(options RunOptions) error {
+	if options.MaxSteps < 0 || options.MaxSteps > SimulationMaxSteps {
+		return fmt.Errorf("maxSteps must be between 1 and %d when provided", SimulationMaxSteps)
+	}
+	if options.MaxVisitsPerNode < 0 || options.MaxVisitsPerNode > SimulationMaxVisitsPerNode {
+		return fmt.Errorf("maxVisitsPerNode must be between 1 and %d when provided", SimulationMaxVisitsPerNode)
+	}
+	if len(options.Input) > SimulationMaxInputProperties {
+		return fmt.Errorf("input must contain at most %d properties", SimulationMaxInputProperties)
+	}
+	if len(options.Overrides.ForcedEdges)+len(options.Overrides.FailedNodes) > SimulationMaxOverrides {
+		return fmt.Errorf("overrides must contain at most %d entries", SimulationMaxOverrides)
+	}
+	return nil
 }
 
 func failedNodeRun(nodeID string, current *token, message string) domain.NodeRun {

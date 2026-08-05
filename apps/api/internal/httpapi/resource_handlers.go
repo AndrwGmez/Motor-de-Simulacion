@@ -8,14 +8,18 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/flowverse/flowverse-api/internal/contract"
 	"github.com/flowverse/flowverse-api/internal/domain"
 	"github.com/flowverse/flowverse-api/internal/engine"
 	"github.com/flowverse/flowverse-api/internal/store"
+	"github.com/flowverse/flowverse-api/internal/telemetry"
 )
 
 func (s *Server) createProject(c *gin.Context) {
@@ -319,6 +323,52 @@ func (s *Server) replaceFlowDraft(c *gin.Context) {
 	c.JSON(http.StatusOK, definition)
 }
 
+func (s *Server) restoreFlowDraft(c *gin.Context) {
+	flow, ok := s.flowWithAccess(c, domain.RoleEditor)
+	if !ok {
+		return
+	}
+	expected := c.GetHeader("If-Match")
+	if expected == "" {
+		writeError(c, http.StatusPreconditionRequired, "draft.if_match_required", "If-Match is required", nil)
+		return
+	}
+	var request struct {
+		VersionID string `json:"versionId"`
+	}
+	if !bindJSON(c, &request) {
+		return
+	}
+	request.VersionID = strings.TrimSpace(request.VersionID)
+	if _, err := uuid.Parse(request.VersionID); err != nil {
+		writeError(c, http.StatusBadRequest, "version.id_invalid", "versionId must be a valid UUID", nil)
+		return
+	}
+	version, err := s.repository.VersionByID(c.Request.Context(), request.VersionID)
+	if err != nil {
+		mapStoreError(c, err)
+		return
+	}
+	if version.FlowID != flow.ID {
+		writeError(c, http.StatusNotFound, "resource.not_found", "Resource not found", nil)
+		return
+	}
+	definition := version.Definition.Normalize()
+	flow.Draft = definition
+	flow.Name, flow.Description = definition.Name, definition.Description
+	flow.DraftETag, flow.UpdatedAt = checksum(definition), now()
+	if err := s.repository.UpdateFlow(c.Request.Context(), flow, expected); err != nil {
+		mapStoreError(c, err)
+		return
+	}
+	c.Header("ETag", flow.DraftETag)
+	c.Header("X-Draft-Revision", flow.DraftETag)
+	c.JSON(http.StatusOK, gin.H{
+		"definition":          definition,
+		"restoredFromVersion": versionView(version),
+	})
+}
+
 func (s *Server) patchFlow(c *gin.Context) {
 	flow, ok := s.flowWithAccess(c, domain.RoleEditor)
 	if !ok {
@@ -468,7 +518,7 @@ func (s *Server) validateDraft(c *gin.Context) {
 func (s *Server) analyzeDraft(c *gin.Context) {
 	flow, ok := s.flowWithAccess(c, domain.RoleViewer)
 	if ok {
-		c.JSON(http.StatusOK, analysisView(engine.Analyze(flow.Draft)))
+		c.JSON(http.StatusOK, analysisView(analyzeWithTelemetry(c, flow.Draft)))
 	}
 }
 
@@ -482,8 +532,21 @@ func (s *Server) validateVersion(c *gin.Context) {
 func (s *Server) analyzeVersion(c *gin.Context) {
 	version, _, ok := s.versionWithAccess(c, domain.RoleViewer)
 	if ok {
-		c.JSON(http.StatusOK, analysisView(engine.Analyze(version.Definition)))
+		c.JSON(http.StatusOK, analysisView(analyzeWithTelemetry(c, version.Definition)))
 	}
+}
+
+func analyzeWithTelemetry(c *gin.Context, definition domain.FlowDefinition) domain.Analysis {
+	started := time.Now()
+	analysis := engine.Analyze(definition)
+	telemetry.AnalysisDuration(c.Request.Context(), time.Since(started))
+	trace.SpanFromContext(c.Request.Context()).SetAttributes(
+		attribute.Int("flowverse.flow.node_count", analysis.NodeCount),
+		attribute.Int("flowverse.flow.edge_count", analysis.EdgeCount),
+		attribute.Int("flowverse.flow.cyclomatic_complexity", analysis.CyclomaticComplexity),
+		attribute.Bool("flowverse.flow.paths_truncated", analysis.PathsTruncated),
+	)
+	return analysis
 }
 
 func (s *Server) importFlow(c *gin.Context) {

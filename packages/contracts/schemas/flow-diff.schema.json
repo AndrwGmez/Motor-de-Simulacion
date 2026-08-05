@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://flowverse.dev/schemas/flow-diff.schema.json",
+  "title": "FlowSemanticDiff",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "algorithmVersion", "flowId", "base", "target", "summary", "changes"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "algorithmVersion": { "const": "semantic-v1" },
+    "flowId": { "type": "string", "format": "uuid" },
+    "base": { "$ref": "#/$defs/revision" },
+    "target": { "$ref": "#/$defs/revision" },
+    "summary": { "$ref": "#/$defs/summary" },
+    "changes": {
+      "type": "array",
+      "maxItems": 15252,
+      "items": { "$ref": "#/$defs/change" }
+    }
+  },
+  "$defs": {
+    "impact": { "enum": ["none", "visual", "behavioral", "breaking"] },
+    "changeImpact": { "enum": ["visual", "behavioral", "breaking"] },
+    "revision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "checksum"],
+      "properties": {
+        "kind": { "enum": ["draft", "version"] },
+        "checksum": { "type": "string" },
+        "versionId": { "type": "string", "format": "uuid" },
+        "versionNumber": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "value": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exists", "value"],
+      "properties": {
+        "exists": { "type": "boolean" },
+        "value": true
+      }
+    },
+    "field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "impact", "before", "after"],
+      "properties": {
+        "path": { "type": "string", "pattern": "^/" },
+        "impact": { "$ref": "#/$defs/changeImpact" },
+        "before": { "$ref": "#/$defs/value" },
+        "after": { "$ref": "#/$defs/value" }
+      }
+    },
+    "change": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "entityType", "operation", "impact", "fields"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^(flow|layout|variable|node|edge)\\.(added|removed|modified)$" },
+        "entityType": { "enum": ["flow", "layout", "variable", "node", "edge"] },
+        "entityId": { "type": "string" },
+        "operation": { "enum": ["added", "removed", "modified"] },
+        "impact": { "$ref": "#/$defs/changeImpact" },
+        "before": { "$ref": "#/$defs/value" },
+        "after": { "$ref": "#/$defs/value" },
+        "fields": { "type": "array", "items": { "$ref": "#/$defs/field" } }
+      }
+    },
+    "operationCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["added", "removed", "modified"],
+      "properties": {
+        "added": { "type": "integer", "minimum": 0 },
+        "removed": { "type": "integer", "minimum": 0 },
+        "modified": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "impactCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["visual", "behavioral", "breaking"],
+      "properties": {
+        "visual": { "type": "integer", "minimum": 0 },
+        "behavioral": { "type": "integer", "minimum": 0 },
+        "breaking": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "entityCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["flow", "layout", "variable", "node", "edge"],
+      "properties": {
+        "flow": { "type": "integer", "minimum": 0 },
+        "layout": { "type": "integer", "minimum": 0 },
+        "variable": { "type": "integer", "minimum": 0 },
+        "node": { "type": "integer", "minimum": 0 },
+        "edge": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exactMatch", "semanticMatch", "behaviorallyEquivalent", "overallImpact", "changeCount", "fieldChangeCount", "byOperation", "byImpact", "byEntity"],
+      "properties": {
+        "exactMatch": { "type": "boolean" },
+        "semanticMatch": { "type": "boolean" },
+        "behaviorallyEquivalent": { "type": "boolean" },
+        "overallImpact": { "$ref": "#/$defs/impact" },
+        "changeCount": { "type": "integer", "minimum": 0 },
+        "fieldChangeCount": { "type": "integer", "minimum": 0 },
+        "byOperation": { "$ref": "#/$defs/operationCounts" },
+        "byImpact": { "$ref": "#/$defs/impactCounts" },
+        "byEntity": { "$ref": "#/$defs/entityCounts" }
+      }
+    }
+  }
+}

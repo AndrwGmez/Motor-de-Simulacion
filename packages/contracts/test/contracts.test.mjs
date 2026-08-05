@@ -5,7 +5,7 @@ import { validateAllContracts } from "../scripts/validate-contracts.mjs";
 
 test("todos los contratos y fixtures son coherentes", async () => {
   const summary = await validateAllContracts();
-  assert.equal(summary.schemas, 4);
+  assert.equal(summary.schemas, 8);
   assert.equal(summary.fixturesChecked, 2);
   assert(summary.openapiOperations >= 1);
   assert.equal(summary.asyncapiChannels, 1);

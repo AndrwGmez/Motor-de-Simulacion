@@ -85,6 +85,25 @@ func TestEmbeddedMigrationContainsCoreTables(t *testing.T) {
 	}
 }
 
+func TestMemoryListsVersionsNewestFirst(t *testing.T) {
+	repository := NewMemory()
+	ctx := context.Background()
+	for _, number := range []int{2, 1, 3} {
+		if err := repository.CreateVersion(ctx, domain.FlowVersion{
+			ID: "version-" + string(rune('0'+number)), FlowID: "flow-1", Number: number,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	versions, err := repository.ListVersions(ctx, "flow-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(versions) != 3 || versions[0].Number != 3 || versions[1].Number != 2 || versions[2].Number != 1 {
+		t.Fatalf("versions are not newest first: %#v", versions)
+	}
+}
+
 func TestMemoryRunIdempotencyExpiresWithoutSliding(t *testing.T) {
 	repository := NewMemory()
 	current := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)

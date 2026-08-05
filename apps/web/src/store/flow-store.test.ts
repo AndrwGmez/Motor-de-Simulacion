@@ -59,6 +59,41 @@ describe("flow store", () => {
     });
     expect(useFlowStore.getState().runHistory).toEqual(runHistory);
   });
+
+  it("aplica una versión como borrador guardado y permite deshacer la restauración", () => {
+    const store = useFlowStore.getState();
+    store.markPublished("version-1", 1);
+    store.selectNode("start");
+    const before = structuredClone(useFlowStore.getState().document.definition);
+    const restored = structuredClone(before);
+    restored.name = "Versión histórica";
+    restored.nodes = restored.nodes.filter((node) => node.id !== "refund");
+
+    store.applyRestoredVersion({
+      version: {
+        id: "version-1",
+        flowId: store.document.flowId,
+        number: 1,
+        checksum: "checksum-1",
+        publishedAt: "2026-07-20T10:00:00.000Z",
+        publishedBy: "user-1",
+      },
+      definition: restored,
+    }, 8, '"restored-8"', "api");
+
+    const applied = useFlowStore.getState();
+    expect(applied.document.status).toBe("draft");
+    expect(applied.document.versionId).toBe(DEMO_DOCUMENT.versionId);
+    expect(applied.document.definition.name).toBe("Versión histórica");
+    expect(applied.document.draftMatchesPublished).toBe(true);
+    expect(applied.document.etag).toBe('"restored-8"');
+    expect(applied.saveStatus).toBe("saved");
+    expect(applied.selectedNodeId).toBeUndefined();
+
+    applied.undo();
+    expect(useFlowStore.getState().document.definition).toEqual(before);
+    expect(useFlowStore.getState().saveStatus).toBe("dirty");
+  });
 });
 
 // Selección múltiple: la especificación la pide en §8.1 y hoy solo se puede
@@ -101,6 +136,21 @@ describe("selección múltiple", () => {
     store.clearSelection();
     expect(useFlowStore.getState().selectedNodeIds).toEqual([]);
     expect(useFlowStore.getState().selectedNodeId).toBeUndefined();
+  });
+
+  it("seleccionar una conexión descarta la multiselección de nodos", () => {
+    const store = useFlowStore.getState();
+    const nodesBefore = store.document.definition.nodes.length;
+    const edge = store.document.definition.edges[0];
+    store.selectNode("start");
+    store.toggleNodeSelection("end");
+
+    store.selectEdge(edge.id);
+    expect(useFlowStore.getState().selectedNodeIds).toEqual([]);
+    useFlowStore.getState().deleteSelected();
+
+    expect(useFlowStore.getState().document.definition.nodes).toHaveLength(nodesBefore);
+    expect(useFlowStore.getState().document.definition.edges).not.toContainEqual(edge);
   });
 
   it("borra todos los nodos seleccionados de una vez", () => {
